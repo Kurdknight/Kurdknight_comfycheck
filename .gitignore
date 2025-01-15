@@ -1,0 +1,13 @@
+# Development files
+node_modules/
+src_web/
+package.json
+package-lock.json
+tsconfig.json
+webpack.config.js
+.prettierrc
+*.log
+
+# Keep the compiled web directory
+!web/
+!web/* 
