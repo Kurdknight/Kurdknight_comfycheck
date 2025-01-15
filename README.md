@@ -1,6 +1,7 @@
 # KurdKnight ComfyUI System Check Node
 
 A comprehensive system information node for ComfyUI that provides detailed information about your system, GPU, CUDA, and AI libraries configuration. Works on both Windows and Linux systems.
+![alt text](https://github.com/Kurdknight/Kurdknight_comfycheck/blob/main/screenshot.png?raw=true)
 
 ## Installation
 1. Navigate to your ComfyUI custom nodes directory
