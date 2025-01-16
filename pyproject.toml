@@ -1,0 +1,14 @@
+[project]
+name = "kurdknight_comfycheck"
+description = "A comprehensive system information node for ComfyUI that provides detailed information about your system, GPU, CUDA, and AI libraries configuration. Works on both Windows and Linux systems."
+version = "1.0.0"
+license = {file = "LICENSE"}
+
+[project.urls]
+Repository = "https://github.com/Kurdknight/Kurdknight_comfycheck"
+#  Used by Comfy Registry https://comfyregistry.org
+
+[tool.comfy]
+PublisherId = ""
+DisplayName = "Kurdknight_comfycheck"
+Icon = ""
