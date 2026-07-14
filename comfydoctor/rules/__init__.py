@@ -47,7 +47,7 @@ def rule(fn: Rule) -> Rule:
 
 def run_all(ctx: Context) -> list[Finding]:
     # Import for side effect: each module registers its rules on import.
-    from . import attention, node_health, packages, system, torch_stack  # noqa: F401
+    from . import attention, node_health, opportunities, packages, system, torch_stack  # noqa: F401
 
     findings: list[Finding] = []
     for name, fn in _RULES:
@@ -70,6 +70,6 @@ def run_all(ctx: Context) -> list[Finding]:
 
 
 def rule_count() -> int:
-    from . import attention, node_health, packages, system, torch_stack  # noqa: F401
+    from . import attention, node_health, opportunities, packages, system, torch_stack  # noqa: F401
 
     return len(_RULES)

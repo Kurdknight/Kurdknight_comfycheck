@@ -28,6 +28,9 @@ _COLOR = {
     Severity.CRITICAL: "\033[1;31m",
     Severity.ERROR: "\033[0;31m",
     Severity.WARNING: "\033[0;33m",
+    # Teal, deliberately not a warning colour. A tip is an opportunity, and
+    # painting it amber trains people to read the whole report as complaints.
+    Severity.TIP: "\033[0;36m",
     Severity.INFO: "\033[0;36m",
     Severity.OK: "\033[0;32m",
 }
@@ -35,6 +38,7 @@ _GLYPH = {
     Severity.CRITICAL: "STOP",
     Severity.ERROR: "FAIL",
     Severity.WARNING: "WARN",
+    Severity.TIP: "TIP ",
     Severity.INFO: "INFO",
     Severity.OK: " OK ",
 }
@@ -93,6 +97,8 @@ def main(argv: list[str] | None = None) -> int:
                    help="emit an anonymized markdown report, ready to paste into an issue")
     p.add_argument("--html", metavar="PATH", help="write a self-contained HTML report to PATH")
     p.add_argument("--quiet", "-q", action="store_true", help="show only problems, hide passing checks")
+    p.add_argument("--env", "-e", action="store_true",
+                   help="print the full environment inventory (what's installed, what isn't)")
     p.add_argument("--fix", metavar="FINDING_ID",
                    help="run the fix for one finding (use the id shown in brackets)")
     p.add_argument("--yes", "-y", action="store_true", help="skip the confirmation prompt for --fix")
@@ -120,6 +126,10 @@ def main(argv: list[str] | None = None) -> int:
         with open(args.html, "w", encoding="utf-8") as f:
             f.write(report.to_html(result))
         print(f"Wrote {args.html}")
+        return _exit_code(result)
+
+    if args.env:
+        _print_env(result, color)
         return _exit_code(result)
 
     if args.fix:
@@ -178,6 +188,51 @@ def _print_human(result, color: bool, quiet: bool) -> None:
     if not quiet:
         print(c("  Full report:  python -m comfydoctor --markdown > report.md", _DIM))
         print()
+
+
+def _print_env(result, color: bool) -> None:
+    """The inventory view: your whole stack on one screen."""
+    def c(s: str, code: str) -> str:
+        return f"{code}{s}{_RESET}" if color else s
+
+    facts = result.facts or {}
+
+    for key, title in (("system", "System"), ("python", "Python"),
+                       ("gpu", "GPU"), ("pytorch", "PyTorch")):
+        rows = facts.get(key) or []
+        if not rows:
+            continue
+        print()
+        print(c(f"  {_RULE * 2} {title} " + _RULE * max(0, 60 - len(title)), _DIM))
+        for r in rows:
+            # Multi-line values (site-packages lists) get hanging-indented so the
+            # columns still line up.
+            val = str(r["value"]).replace("\n", "\n" + " " * 26)
+            print(f"  {r['label']:<22}  {val}")
+            if r.get("note"):
+                print(c(f"  {'':<22}  {r['note']}", _DIM))
+
+    for group in facts.get("libraries") or []:
+        print()
+        head = f"{group['group']}  [{group['installed']}/{group['total']}]"
+        print(c(f"  {_RULE * 2} {head} " + _RULE * max(0, 60 - len(head)), _DIM))
+        for item in group["items"]:
+            if item["installed"]:
+                ver = c(item["version"], _COLOR[Severity.OK])
+            else:
+                # Muted, never red: a missing optional package is not an error.
+                ver = c("not installed", _DIM)
+            print(f"  {item['name']:<28}  {ver}")
+            print(c(f"  {'':<28}  {item['note']}", _DIM))
+
+    envs = facts.get("environment_variables") or []
+    if envs:
+        print()
+        print(c(f"  {_RULE * 2} Environment variables " + _RULE * 38, _DIM))
+        for v in envs:
+            shown = v["value"] if v["set"] else c("not set", _DIM)
+            print(f"  {v['name']:<32}  {shown}")
+    print()
 
 
 def _do_fix(finding_id: str, assume_yes: bool) -> int:

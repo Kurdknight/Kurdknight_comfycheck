@@ -26,6 +26,7 @@ _LABEL = {
     Severity.CRITICAL: "CRITICAL",
     Severity.ERROR: "ERROR",
     Severity.WARNING: "WARNING",
+    Severity.TIP: "TIP",
     Severity.INFO: "INFO",
     Severity.OK: "OK",
 }
@@ -34,6 +35,7 @@ _EMOJI = {
     Severity.CRITICAL: "🛑",
     Severity.ERROR: "❌",
     Severity.WARNING: "⚠️",
+    Severity.TIP: "🚀",
     Severity.INFO: "ℹ️",
     Severity.OK: "✅",
 }
@@ -239,12 +241,14 @@ _CSS = """
 :root {
   --bg:#ffffff; --bg2:#f6f6f5; --fg:#1c1917; --fg2:#57534e; --line:#d6d3d1;
   --crit:#b91c1c; --err:#c2410c; --warn:#a16207; --info:#0f766e; --ok:#15803d;
+  --tip:#0f766e;
   --code-bg:#f2f1ef; --code-fg:#1c1917;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --bg:#17171a; --bg2:#1f1f23; --fg:#e7e5e4; --fg2:#a8a29e; --line:#3a3a40;
     --crit:#f87171; --err:#fb923c; --warn:#fbbf24; --info:#5eead4; --ok:#4ade80;
+    --tip:#5eead4;
     --code-bg:#111114; --code-fg:#e7e5e4;
   }
 }
@@ -276,6 +280,7 @@ h2.cat { font-size:.78rem; text-transform:uppercase; letter-spacing:.08em; color
 .f.critical { border-left-color:var(--crit); }
 .f.error    { border-left-color:var(--err); }
 .f.warning  { border-left-color:var(--warn); }
+.f.tip      { border-left-color:var(--tip); }
 .f.info     { border-left-color:var(--info); }
 .f.ok       { border-left-color:var(--ok); }
 .fh { display:flex; align-items:center; gap:.6rem; flex-wrap:wrap; }
@@ -284,6 +289,7 @@ h2.cat { font-size:.78rem; text-transform:uppercase; letter-spacing:.08em; color
         border-radius:3px; border:1px solid currentColor; white-space:nowrap; }
 .chip.critical { color:var(--crit); } .chip.error { color:var(--err); }
 .chip.warning { color:var(--warn); }  .chip.info  { color:var(--info); }
+.chip.tip { color:var(--tip); }
 .chip.ok { color:var(--ok); }
 pre { background:var(--code-bg); color:var(--code-fg); padding:.7rem .85rem; border-radius:4px;
       overflow-x:auto; font:13px/1.55 ui-monospace,"Cascadia Code",Consolas,monospace;
