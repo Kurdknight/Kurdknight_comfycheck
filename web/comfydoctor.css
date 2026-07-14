@@ -1,0 +1,656 @@
+/* ComfyDoctor sidebar panel.
+ * Every selector is scoped under .comfydoctor so nothing leaks into ComfyUI's own UI.
+ * Flat, no shadows/gradients/3D, no pill buttons (max 4px radius), no pink.
+ *
+ * Theming: ComfyUI's built-in palettes add a `dark-theme` class to <body> for dark
+ * palettes and leave it absent for the light palette (verified against the shipped
+ * frontend bundle). We mirror that with our own --cd-* tokens, seeded from ComfyUI's
+ * CSS variables where available, so we track both the OS preference (as a fallback
+ * when ComfyUI vars are missing) and ComfyUI's own in-app theme toggle.
+ */
+
+/* Default tokens: dark, since ComfyUI ships dark-by-default. */
+:root {
+  --cd-bg: var(--comfy-menu-bg, #262626);
+  --cd-surface: var(--comfy-input-bg, #1d1d1d);
+  --cd-surface-raised: #2c2c2c;
+  --cd-fg: var(--fg-color, #e8e8e8);
+  --cd-fg-muted: var(--descrip-text, #a8a8a8);
+  --cd-border: var(--border-color, #4a4a4a);
+
+  --cd-accent: #0f766e;
+  --cd-accent-hover: #115e59;
+  --cd-accent-fg: #ffffff;
+
+  --cd-critical: #f87171;
+  --cd-critical-bg: rgba(248, 113, 113, 0.16);
+  --cd-error: #fb923c;
+  --cd-error-bg: rgba(251, 146, 60, 0.16);
+  --cd-warning: #fbbf24;
+  --cd-warning-bg: rgba(251, 191, 36, 0.16);
+  --cd-info: #2dd4bf;
+  --cd-info-bg: rgba(45, 212, 191, 0.16);
+  --cd-ok: #4ade80;
+  --cd-ok-bg: rgba(74, 222, 128, 0.16);
+
+  --cd-danger-bg: rgba(248, 113, 113, 0.12);
+  --cd-danger-border: #f87171;
+  --cd-restart-bg: rgba(45, 212, 191, 0.12);
+}
+
+/* OS-level fallback for when ComfyUI's own vars are unavailable (e.g. this file
+ * loaded outside a ComfyUI page during development). */
+@media (prefers-color-scheme: light) {
+  :root {
+    --cd-bg: var(--comfy-menu-bg, #f4f4f5);
+    --cd-surface: var(--comfy-input-bg, #ffffff);
+    --cd-surface-raised: #ffffff;
+    --cd-fg: var(--fg-color, #18181b);
+    --cd-fg-muted: var(--descrip-text, #52525b);
+    --cd-border: var(--border-color, #d4d4d8);
+
+    --cd-critical: #b91c1c;
+    --cd-critical-bg: rgba(185, 28, 28, 0.09);
+    --cd-error: #c2410c;
+    --cd-error-bg: rgba(194, 65, 12, 0.09);
+    --cd-warning: #a16207;
+    --cd-warning-bg: rgba(161, 98, 7, 0.10);
+    --cd-info: #0f766e;
+    --cd-info-bg: rgba(15, 118, 110, 0.09);
+    --cd-ok: #15803d;
+    --cd-ok-bg: rgba(21, 128, 61, 0.09);
+
+    --cd-danger-bg: rgba(185, 28, 28, 0.07);
+    --cd-danger-border: #b91c1c;
+    --cd-restart-bg: rgba(15, 118, 110, 0.09);
+  }
+}
+
+/* ComfyUI's in-app theme toggle (authoritative over OS preference). */
+body.dark-theme .comfydoctor {
+  --cd-bg: var(--comfy-menu-bg, #262626);
+  --cd-surface: var(--comfy-input-bg, #1d1d1d);
+  --cd-surface-raised: #2c2c2c;
+  --cd-fg: var(--fg-color, #e8e8e8);
+  --cd-fg-muted: var(--descrip-text, #a8a8a8);
+  --cd-border: var(--border-color, #4a4a4a);
+
+  --cd-critical: #f87171;
+  --cd-critical-bg: rgba(248, 113, 113, 0.16);
+  --cd-error: #fb923c;
+  --cd-error-bg: rgba(251, 146, 60, 0.16);
+  --cd-warning: #fbbf24;
+  --cd-warning-bg: rgba(251, 191, 36, 0.16);
+  --cd-info: #2dd4bf;
+  --cd-info-bg: rgba(45, 212, 191, 0.16);
+  --cd-ok: #4ade80;
+  --cd-ok-bg: rgba(74, 222, 128, 0.16);
+
+  --cd-danger-bg: rgba(248, 113, 113, 0.12);
+  --cd-danger-border: #f87171;
+  --cd-restart-bg: rgba(45, 212, 191, 0.12);
+}
+
+body:not(.dark-theme) .comfydoctor {
+  --cd-bg: var(--comfy-menu-bg, #f4f4f5);
+  --cd-surface: var(--comfy-input-bg, #ffffff);
+  --cd-surface-raised: #ffffff;
+  --cd-fg: var(--fg-color, #18181b);
+  --cd-fg-muted: var(--descrip-text, #52525b);
+  --cd-border: var(--border-color, #d4d4d8);
+
+  --cd-critical: #b91c1c;
+  --cd-critical-bg: rgba(185, 28, 28, 0.09);
+  --cd-error: #c2410c;
+  --cd-error-bg: rgba(194, 65, 12, 0.09);
+  --cd-warning: #a16207;
+  --cd-warning-bg: rgba(161, 98, 7, 0.10);
+  --cd-info: #0f766e;
+  --cd-info-bg: rgba(15, 118, 110, 0.09);
+  --cd-ok: #15803d;
+  --cd-ok-bg: rgba(21, 128, 61, 0.09);
+
+  --cd-danger-bg: rgba(185, 28, 28, 0.07);
+  --cd-danger-border: #b91c1c;
+  --cd-restart-bg: rgba(15, 118, 110, 0.09);
+}
+
+/* ---------------------------------------------------------------------- */
+/* Base                                                                    */
+/* ---------------------------------------------------------------------- */
+
+.comfydoctor {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  color: var(--cd-fg);
+  background: var(--cd-bg);
+  font-size: 13px;
+  line-height: 1.45;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.comfydoctor *,
+.comfydoctor *::before,
+.comfydoctor *::after {
+  box-sizing: border-box;
+}
+.comfydoctor .cd-icon {
+  font-size: 13px;
+  line-height: 1;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Buttons                                                                 */
+/* ---------------------------------------------------------------------- */
+
+.comfydoctor .cd-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--cd-border);
+  background: var(--cd-surface);
+  color: var(--cd-fg);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.comfydoctor .cd-btn:hover:not(:disabled) {
+  border-color: var(--cd-accent);
+}
+.comfydoctor .cd-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.comfydoctor .cd-btn-primary {
+  background: var(--cd-accent);
+  border-color: var(--cd-accent);
+  color: var(--cd-accent-fg);
+}
+.comfydoctor .cd-btn-primary:hover:not(:disabled) {
+  background: var(--cd-accent-hover);
+  border-color: var(--cd-accent-hover);
+}
+.comfydoctor .cd-btn-sm {
+  padding: 3px 7px;
+  font-size: 11px;
+  flex: 0 0 auto;
+}
+.comfydoctor .cd-btn-flash .cd-btn-label {
+  font-weight: 600;
+}
+.comfydoctor .cd-btn-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Header                                                                  */
+/* ---------------------------------------------------------------------- */
+
+.comfydoctor .cd-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--cd-border);
+}
+.comfydoctor .cd-score-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.comfydoctor .cd-score {
+  flex: 0 0 auto;
+  width: 56px;
+  height: 56px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid currentColor;
+}
+.comfydoctor .cd-score-num {
+  font-size: 20px;
+  font-weight: 700;
+}
+.comfydoctor .cd-score--ok { color: var(--cd-ok); }
+.comfydoctor .cd-score--minor { color: var(--cd-info); }
+.comfydoctor .cd-score--attention { color: var(--cd-warning); }
+.comfydoctor .cd-score--broken { color: var(--cd-critical); }
+
+.comfydoctor .cd-score-info {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.comfydoctor .cd-score-label {
+  font-weight: 700;
+  font-size: 14px;
+}
+.comfydoctor .cd-score-label--ok { color: var(--cd-ok); }
+.comfydoctor .cd-score-label--minor { color: var(--cd-info); }
+.comfydoctor .cd-score-label--attention { color: var(--cd-warning); }
+.comfydoctor .cd-score-label--broken { color: var(--cd-critical); }
+
+.comfydoctor .cd-counts-line,
+.comfydoctor .cd-meta-line {
+  color: var(--cd-fg-muted);
+  font-size: 11px;
+  word-break: break-word;
+}
+
+.comfydoctor .cd-runtime-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--cd-info-bg);
+  color: var(--cd-info);
+  font-size: 11px;
+}
+
+.comfydoctor .cd-header-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.comfydoctor .cd-header-btns .cd-btn {
+  flex: 1 1 auto;
+  justify-content: center;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Skeleton / error views                                                  */
+/* ---------------------------------------------------------------------- */
+
+.comfydoctor .cd-skeleton,
+.comfydoctor .cd-error-view {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 40px 12px;
+  text-align: center;
+  color: var(--cd-fg-muted);
+}
+.comfydoctor .cd-skeleton .cd-icon,
+.comfydoctor .cd-error-view .cd-icon {
+  font-size: 22px;
+}
+.comfydoctor .cd-error-view .cd-icon {
+  color: var(--cd-critical);
+}
+.comfydoctor .cd-error-text {
+  color: var(--cd-fg);
+  max-width: 100%;
+  word-break: break-word;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Findings list                                                           */
+/* ---------------------------------------------------------------------- */
+
+.comfydoctor .cd-findings {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.comfydoctor .cd-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--cd-ok);
+  padding: 20px 4px;
+}
+
+.comfydoctor .cd-category-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--cd-fg-muted);
+  margin-bottom: 6px;
+}
+.comfydoctor .cd-category-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.comfydoctor .cd-finding {
+  border: 1px solid var(--cd-border);
+  border-radius: 4px;
+  background: var(--cd-surface);
+  overflow: hidden;
+}
+
+/* Two rows, not one. The sidebar is ~350px: with the dot, the severity chip,
+   the "Fix available" pill and the chevron all sharing a single flex line, the
+   title was left with ~140px and wrapped into four lines. The metadata gets
+   row 1; the title gets a full-width row 2 to itself. */
+.comfydoctor .cd-finding-header {
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 8px;
+  background: transparent;
+  border: none;
+  color: var(--cd-fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.comfydoctor .cd-finding-header > .cd-caret {
+  margin-left: auto;   /* pin the caret to the right of row 1 */
+}
+.comfydoctor .cd-finding-header:hover {
+  background: var(--cd-surface-raised);
+}
+
+.comfydoctor .cd-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.comfydoctor .cd-dot--critical { background: var(--cd-critical); }
+.comfydoctor .cd-dot--error { background: var(--cd-error); }
+.comfydoctor .cd-dot--warning { background: var(--cd-warning); }
+.comfydoctor .cd-dot--info { background: var(--cd-info); }
+.comfydoctor .cd-dot--ok { background: var(--cd-ok); }
+
+.comfydoctor .cd-chip {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid currentColor;
+}
+.comfydoctor .cd-chip--critical { color: var(--cd-critical); background: var(--cd-critical-bg); }
+.comfydoctor .cd-chip--error { color: var(--cd-error); background: var(--cd-error-bg); }
+.comfydoctor .cd-chip--warning { color: var(--cd-warning); background: var(--cd-warning-bg); }
+.comfydoctor .cd-chip--info { color: var(--cd-info); background: var(--cd-info-bg); }
+.comfydoctor .cd-chip--ok { color: var(--cd-ok); background: var(--cd-ok-bg); }
+
+.comfydoctor .cd-finding-title {
+  order: 2;              /* forces it onto its own line, below the chips */
+  flex: 1 0 100%;
+  min-width: 0;
+  overflow-wrap: break-word;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.comfydoctor .cd-pill-fix {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--cd-accent);
+  color: var(--cd-accent-fg);
+}
+.comfydoctor .cd-pill-fix .cd-icon {
+  font-size: 10px;
+}
+
+.comfydoctor .cd-caret {
+  flex: 0 0 auto;
+  color: var(--cd-fg-muted);
+}
+
+.comfydoctor .cd-finding-body {
+  padding: 0 10px 10px 10px;
+  border-top: 1px solid var(--cd-border);
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.comfydoctor .cd-finding-body.cd-collapsed {
+  display: none;
+}
+
+.comfydoctor .cd-detail {
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  font-family: inherit;
+  color: var(--cd-fg);
+  background: var(--cd-surface-raised);
+  border: 1px solid var(--cd-border);
+  border-radius: 4px;
+  padding: 8px;
+  font-size: 12px;
+}
+
+.comfydoctor .cd-impact-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--cd-fg-muted);
+  margin-bottom: 3px;
+}
+.comfydoctor .cd-impact-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Remedy block                                                            */
+/* ---------------------------------------------------------------------- */
+
+.comfydoctor .cd-remedy {
+  border: 1px solid var(--cd-border);
+  border-radius: 4px;
+  padding: 8px;
+  background: var(--cd-bg);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.comfydoctor .cd-remedy-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+}
+.comfydoctor .cd-remedy-title .cd-icon {
+  color: var(--cd-accent);
+}
+.comfydoctor .cd-remedy-explain {
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  color: var(--cd-fg-muted);
+}
+
+.comfydoctor .cd-cmd-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.comfydoctor .cd-cmd-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.comfydoctor .cd-cmd-code-wrap {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  background: var(--cd-surface);
+  border: 1px solid var(--cd-border);
+  border-radius: 4px;
+  padding: 5px 7px;
+}
+.comfydoctor .cd-cmd-code {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 11px;
+  white-space: pre;
+  color: var(--cd-fg);
+}
+
+.comfydoctor .cd-doc-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--cd-accent);
+  text-decoration: none;
+  font-size: 12px;
+  width: fit-content;
+}
+.comfydoctor .cd-doc-link:hover {
+  text-decoration: underline;
+}
+
+.comfydoctor .cd-inline-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: var(--cd-critical);
+  background: var(--cd-critical-bg);
+  border: 1px solid var(--cd-critical);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 12px;
+  word-break: break-word;
+}
+
+.comfydoctor .cd-confirm-box {
+  border: 1px solid var(--cd-border);
+  border-radius: 4px;
+  padding: 8px;
+  background: var(--cd-surface);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.comfydoctor .cd-confirm-label {
+  font-weight: 600;
+}
+.comfydoctor .cd-restart-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--cd-restart-bg);
+  color: var(--cd-info);
+  font-size: 12px;
+}
+.comfydoctor .cd-danger-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--cd-danger-bg);
+  border: 1px solid var(--cd-danger-border);
+  color: var(--cd-critical);
+  font-size: 12px;
+  word-break: break-word;
+}
+
+.comfydoctor .cd-status-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--cd-fg-muted);
+}
+
+.comfydoctor .cd-run-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.comfydoctor .cd-run-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 7px;
+  border-radius: 4px;
+}
+.comfydoctor .cd-run-badge--running {
+  color: var(--cd-info);
+  background: var(--cd-info-bg);
+}
+.comfydoctor .cd-elapsed {
+  font-size: 11px;
+  color: var(--cd-fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+.comfydoctor .cd-run-status .cd-btn {
+  margin-left: auto;
+}
+
+.comfydoctor .cd-banner {
+  flex: 1 1 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 7px 9px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  word-break: break-word;
+}
+.comfydoctor .cd-banner--ok {
+  background: var(--cd-ok-bg);
+  color: var(--cd-ok);
+  border: 1px solid var(--cd-ok);
+}
+.comfydoctor .cd-banner--fail {
+  background: var(--cd-critical-bg);
+  color: var(--cd-critical);
+  border: 1px solid var(--cd-critical);
+}
+.comfydoctor .cd-banner--warn {
+  background: var(--cd-warning-bg);
+  color: var(--cd-warning);
+  border: 1px solid var(--cd-warning);
+}
+
+.comfydoctor .cd-log {
+  margin: 0;
+  max-height: 260px;
+  overflow: auto;
+  background: #111318;
+  color: #d4d8dd;
+  border: 1px solid var(--cd-border);
+  border-radius: 4px;
+  padding: 8px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}

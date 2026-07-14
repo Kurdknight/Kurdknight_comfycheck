@@ -1,0 +1,35 @@
+# Publishes a new version to the Comfy Registry whenever pyproject.toml's
+# version field changes on main.
+#
+# One-time setup (the only part that cannot be automated):
+#   1. Go to https://registry.comfy.org, sign in with GitHub.
+#   2. Your publisher `kurdknight` (ComfyKurd) already exists - you own it.
+#   3. Create an API key for the publisher.
+#   4. In this repo: Settings -> Secrets and variables -> Actions -> New
+#      repository secret, named REGISTRY_ACCESS_TOKEN.
+#
+# After that, bumping `version` in pyproject.toml and pushing is the entire
+# release process. This is what turns the Manager listing from "nightly" (a raw
+# git clone of main) into a real versioned install.
+
+name: Publish to Comfy Registry
+
+on:
+  push:
+    branches: [main]
+    paths: [pyproject.toml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Publish custom node
+        uses: Comfy-Org/publish-node-action@v1
+        with:
+          personal_access_token: ${{ secrets.REGISTRY_ACCESS_TOKEN }}
