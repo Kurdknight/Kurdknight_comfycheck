@@ -9,7 +9,7 @@ Checked live against `api.comfy.org`:
 
 | Thing | State |
 |---|---|
-| Publisher `kurdknight` ("ComfyKurd") | **Exists, you own it** — `twana.info@gmail.com`, role `owner` |
+| Publisher `kurdknight` ("ComfyKurd") | **Exists, you own it** (role `owner`) |
 | Node `Kurdknight_comfycheck` | **Exists, attached to your publisher**, points at the right repo |
 | Published versions | **Zero.** `GET /nodes/Kurdknight_comfycheck/versions` → `[]` |
 | `/install` endpoint | **404** — the registry has no artifact to serve |
