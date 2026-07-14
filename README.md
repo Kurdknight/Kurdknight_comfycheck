@@ -12,6 +12,18 @@ built with the correct Python for your install.
 > never finishes booting, so a diagnostic *node* can never load — it's unavailable at exactly
 > the moment you need it. ComfyDoctor ships a standalone launcher for that case.
 
+![ComfyDoctor panel](docs/panel.png)
+
+Every finding says what it is, **what it will actually do to you**, and how to fix it — with a
+button that runs the fix against the correct Python for your install.
+
+<details>
+<summary><b>The exported report</b> (self-contained HTML, light + dark, paths anonymized)</summary>
+
+![HTML report](docs/report-dark.png)
+
+</details>
+
 ---
 
 ## Install
