@@ -80,16 +80,21 @@ function apiUrl(path) {
 // Severity + health metadata
 // ---------------------------------------------------------------------------
 
-const SEVERITY_LABEL = { critical: "Critical", error: "Error", warning: "Warning", info: "Info", ok: "OK" };
+const SEVERITY_LABEL = { critical: "Critical", error: "Error", warning: "Warning", tip: "Tip", info: "Info", ok: "OK" };
 const SEVERITY_NOUN = {
   critical: ["critical", "criticals"],
   error: ["error", "errors"],
   warning: ["warning", "warnings"],
+  tip: ["speed-up available", "speed-ups available"],
   info: ["info item", "info items"],
   ok: ["all-clear", "all-clears"],
 };
 
-function healthLabel(score) {
+function healthLabel(score, data) {
+  // The server computes this from the worst finding, not from the number.
+  // Recomputing it here from the score alone would let the panel say "Broken"
+  // about an install whose only sin is 24 warnings.
+  if (data && data.health_label) return data.health_label;
   if (score >= 100) return "Healthy";
   if (score >= 80) return "Minor issues";
   if (score >= 60) return "Needs attention";
@@ -105,7 +110,7 @@ function healthTier(score) {
 
 function countsPhrase(counts) {
   if (!counts) return "";
-  const order = ["critical", "error", "warning", "info", "ok"];
+  const order = ["critical", "error", "warning", "tip", "info", "ok"];
   const parts = [];
   for (const key of order) {
     const n = counts[key] || 0;
@@ -403,6 +408,179 @@ function buildFindingsList(data, ctx) {
 }
 
 // ---------------------------------------------------------------------------
+// Environment view — renders data.facts (system/python/gpu/pytorch/libraries/env vars)
+// ---------------------------------------------------------------------------
+
+/** One label/value(/note) row, used by the System/Python/GPU/PyTorch sections. */
+function buildFactRow(item, { copyable = false } = {}) {
+  const row = el("div", { class: "cd-fact-row" });
+  row.appendChild(el("div", { class: "cd-fact-label", text: item.label || "" }));
+
+  const valueStr = item.value === null || item.value === undefined ? "" : String(item.value);
+  const valueWrap = el("div", { class: "cd-fact-value-wrap" });
+  valueWrap.appendChild(el("div", { class: "cd-fact-value", text: valueStr }));
+  if (copyable && valueStr) {
+    const copyBtn = iconButton("pi-copy", "Copy", () => copyText(valueStr, copyBtn), "cd-btn-sm");
+    valueWrap.appendChild(copyBtn);
+  }
+  row.appendChild(valueWrap);
+
+  if (item.note) {
+    row.appendChild(el("div", { class: "cd-fact-note", text: item.note }));
+  }
+  return row;
+}
+
+/** A System/Python/GPU/PyTorch style section — degrades to null (nothing rendered) when empty. */
+function buildFactSection(title, items) {
+  if (!Array.isArray(items) || !items.length) return null;
+  const section = el("div", { class: "cd-category" });
+  section.appendChild(el("div", { class: "cd-category-title", text: title }));
+  const list = el("div", { class: "cd-fact-list" });
+  items.forEach((item) => {
+    if (!item) return;
+    const copyable = title === "Python" && item.label === "Install command";
+    list.appendChild(buildFactRow(item, { copyable }));
+  });
+  section.appendChild(list);
+  return section;
+}
+
+/** One collapsible library group — collapsed by default, count badge in the header. */
+function buildLibraryGroup(group) {
+  const items = Array.isArray(group.items) ? group.items : [];
+  const installed = typeof group.installed === "number" ? group.installed : items.filter((i) => i.installed).length;
+  const total = typeof group.total === "number" ? group.total : items.length;
+
+  let expanded = false;
+  const wrap = el("div", { class: "cd-lib-group" });
+
+  const header = el("button", { class: "cd-lib-group-header", type: "button", "aria-expanded": String(expanded) });
+  const caret = icon("pi-angle-right");
+  caret.classList.add("cd-caret");
+  header.appendChild(caret);
+  header.appendChild(el("span", { class: "cd-lib-group-title", text: group.group || "" }));
+  header.appendChild(el("span", { class: "cd-lib-group-badge", text: `${installed}/${total}` }));
+  wrap.appendChild(header);
+
+  const body = el("div", { class: "cd-lib-group-body cd-collapsed" });
+  items.forEach((item) => {
+    if (!item) return;
+    const row = el("div", { class: "cd-lib-item" });
+    const nameRow = el("div", { class: "cd-lib-item-row" });
+    nameRow.appendChild(el("span", { class: "cd-lib-item-name", text: item.name || "" }));
+    if (item.installed) {
+      nameRow.appendChild(el("span", { class: "cd-lib-item-version", text: item.version || "" }));
+    } else {
+      nameRow.appendChild(el("span", { class: "cd-lib-item-missing", text: "not installed" }));
+    }
+    row.appendChild(nameRow);
+    if (item.note) row.appendChild(el("div", { class: "cd-fact-note", text: item.note }));
+    body.appendChild(row);
+  });
+  wrap.appendChild(body);
+
+  header.addEventListener("click", () => {
+    expanded = !expanded;
+    header.setAttribute("aria-expanded", String(expanded));
+    body.classList.toggle("cd-collapsed", !expanded);
+    caret.className = `pi ${expanded ? "pi-angle-down" : "pi-angle-right"} cd-icon cd-caret`;
+  });
+
+  return wrap;
+}
+
+function buildLibrariesSection(groups) {
+  if (!Array.isArray(groups) || !groups.length) return null;
+  const section = el("div", { class: "cd-category" });
+  section.appendChild(el("div", { class: "cd-category-title", text: "Libraries" }));
+  const list = el("div", { class: "cd-lib-groups" });
+  groups.forEach((group) => {
+    if (!group) return;
+    list.appendChild(buildLibraryGroup(group));
+  });
+  section.appendChild(list);
+  return section;
+}
+
+function buildEnvVarsSection(vars) {
+  if (!Array.isArray(vars) || !vars.length) return null;
+  const section = el("div", { class: "cd-category" });
+  section.appendChild(el("div", { class: "cd-category-title", text: "Environment variables" }));
+  const list = el("div", { class: "cd-envvar-list" });
+  vars.forEach((v) => {
+    if (!v) return;
+    const row = el("div", { class: "cd-envvar-row" });
+    const nameRow = el("div", { class: "cd-envvar-name-row" });
+    nameRow.appendChild(el("span", { class: "cd-envvar-name", text: v.name || "" }));
+    if (v.set) {
+      const valueStr = v.value === null || v.value === undefined ? "" : String(v.value);
+      nameRow.appendChild(el("span", { class: "cd-envvar-value", text: valueStr }));
+    } else {
+      nameRow.appendChild(el("span", { class: "cd-envvar-missing", text: "not set" }));
+    }
+    row.appendChild(nameRow);
+    if (v.note) row.appendChild(el("div", { class: "cd-fact-note", text: v.note }));
+    list.appendChild(row);
+  });
+  section.appendChild(list);
+  return section;
+}
+
+function buildEnvironmentView(data) {
+  const container = el("div", { class: "cd-environment" });
+  const facts = (data && data.facts) || {};
+
+  const sections = [
+    buildFactSection("System", facts.system),
+    buildFactSection("Python", facts.python),
+    buildFactSection("GPU", facts.gpu),
+    buildFactSection("PyTorch", facts.pytorch),
+    buildLibrariesSection(facts.libraries),
+    buildEnvVarsSection(facts.environment_variables),
+  ].filter(Boolean);
+
+  if (!sections.length) {
+    container.appendChild(
+      el("div", { class: "cd-empty" }, [icon("pi-info-circle"), el("span", { text: "No environment data available." })])
+    );
+    return container;
+  }
+
+  sections.forEach((section) => container.appendChild(section));
+  return container;
+}
+
+// ---------------------------------------------------------------------------
+// View toggle — Findings / Environment, flat segmented control
+// ---------------------------------------------------------------------------
+
+function buildViewToggle(state, onChange) {
+  const wrap = el("div", { class: "cd-view-toggle", role: "group" });
+
+  function makeButton(view, piClass, label) {
+    const active = state.view === view;
+    const btn = el("button", {
+      class: "cd-view-toggle-btn",
+      type: "button",
+      "aria-pressed": String(active),
+    });
+    btn.appendChild(icon(piClass));
+    btn.appendChild(el("span", { class: "cd-btn-label", text: label }));
+    btn.addEventListener("click", () => {
+      if (state.view === view) return;
+      state.view = view;
+      onChange();
+    });
+    return btn;
+  }
+
+  wrap.appendChild(makeButton("findings", "pi-list", "Findings"));
+  wrap.appendChild(makeButton("environment", "pi-server", "Environment"));
+  return wrap;
+}
+
+// ---------------------------------------------------------------------------
 // Header, skeleton, error view
 // ---------------------------------------------------------------------------
 
@@ -435,7 +613,7 @@ function buildHeader(data, ctx) {
   scoreRow.appendChild(scoreCircle);
 
   const info = el("div", { class: "cd-score-info" });
-  info.appendChild(el("div", { class: `cd-score-label cd-score-label--${tier}`, text: healthLabel(data.health) }));
+  info.appendChild(el("div", { class: `cd-score-label cd-score-label--${tier}`, text: healthLabel(data.health, data) }));
   const counts = countsPhrase(data.counts);
   if (counts) info.appendChild(el("div", { class: "cd-counts-line", text: counts }));
   const scannedAt = data.scanned_at ? new Date(data.scanned_at) : null;
@@ -529,7 +707,9 @@ app.registerExtension({
         ensureStylesheet();
 
         const ctx = { timers: new Set() };
-        const state = { loading: false, error: null, data: null };
+        // `view` persists across re-scans (scan() never touches it) since it lives on
+        // this same state object that survives the whole life of the panel.
+        const state = { loading: false, error: null, data: null, view: "findings" };
 
         const panelRoot = el("div", { class: "comfydoctor" });
         rootEl.textContent = "";
@@ -547,7 +727,12 @@ app.registerExtension({
           }
           if (!state.data) return;
           panelRoot.appendChild(buildHeader(state.data, ctx));
-          panelRoot.appendChild(buildFindingsList(state.data, ctx));
+          panelRoot.appendChild(buildViewToggle(state, update));
+          if (state.view === "environment") {
+            panelRoot.appendChild(buildEnvironmentView(state.data));
+          } else {
+            panelRoot.appendChild(buildFindingsList(state.data, ctx));
+          }
         }
 
         async function scan() {

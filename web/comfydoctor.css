@@ -272,6 +272,42 @@ body:not(.dark-theme) .comfydoctor {
 }
 
 /* ---------------------------------------------------------------------- */
+/* View toggle — flat segmented control, Findings / Environment            */
+/* ---------------------------------------------------------------------- */
+
+.comfydoctor .cd-view-toggle {
+  display: flex;
+  border: 1px solid var(--cd-border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.comfydoctor .cd-view-toggle-btn {
+  flex: 1 1 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 8px;
+  border: none;
+  background: var(--cd-surface);
+  color: var(--cd-fg-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.comfydoctor .cd-view-toggle-btn + .cd-view-toggle-btn {
+  border-left: 1px solid var(--cd-border);
+}
+.comfydoctor .cd-view-toggle-btn:hover {
+  color: var(--cd-fg);
+}
+.comfydoctor .cd-view-toggle-btn[aria-pressed="true"] {
+  background: var(--cd-surface-raised);
+  color: var(--cd-fg);
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------------- */
 /* Skeleton / error views                                                  */
 /* ---------------------------------------------------------------------- */
 
@@ -653,4 +689,192 @@ body:not(.dark-theme) .comfydoctor {
   white-space: pre-wrap;
   word-break: break-word;
   overflow-wrap: break-word;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Environment view                                                        */
+/* ---------------------------------------------------------------------- */
+
+.comfydoctor .cd-environment {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+/* System / Python / GPU / PyTorch — label/value(/note) rows. */
+.comfydoctor .cd-fact-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.comfydoctor .cd-fact-row {
+  border: 1px solid var(--cd-border);
+  border-radius: 4px;
+  background: var(--cd-surface);
+  padding: 6px 8px;
+  min-width: 0;
+}
+.comfydoctor .cd-fact-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--cd-fg-muted);
+  margin-bottom: 3px;
+}
+.comfydoctor .cd-fact-value-wrap {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+.comfydoctor .cd-fact-value-wrap .cd-btn {
+  flex: 0 0 auto;
+}
+.comfydoctor .cd-fact-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  overflow-x: auto;
+  color: var(--cd-fg);
+}
+.comfydoctor .cd-fact-note {
+  margin-top: 4px;
+  color: var(--cd-fg-muted);
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+/* Libraries — collapsible groups, collapsed by default. */
+.comfydoctor .cd-lib-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.comfydoctor .cd-lib-group {
+  border: 1px solid var(--cd-border);
+  border-radius: 4px;
+  background: var(--cd-surface);
+  overflow: hidden;
+}
+.comfydoctor .cd-lib-group-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  background: transparent;
+  border: none;
+  color: var(--cd-fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.comfydoctor .cd-lib-group-header:hover {
+  background: var(--cd-surface-raised);
+}
+.comfydoctor .cd-lib-group-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: break-word;
+  font-weight: 600;
+}
+.comfydoctor .cd-lib-group-badge {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--cd-border);
+  color: var(--cd-fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+.comfydoctor .cd-lib-group-header > .cd-caret {
+  flex: 0 0 auto;
+}
+.comfydoctor .cd-lib-group-body {
+  padding: 0 8px 8px 8px;
+  border-top: 1px solid var(--cd-border);
+  padding-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.comfydoctor .cd-lib-group-body.cd-collapsed {
+  display: none;
+}
+.comfydoctor .cd-lib-item {
+  min-width: 0;
+}
+.comfydoctor .cd-lib-item-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.comfydoctor .cd-lib-item-name {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 12px;
+  color: var(--cd-fg);
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+.comfydoctor .cd-lib-item-version {
+  font-size: 12px;
+  color: var(--cd-fg);
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+.comfydoctor .cd-lib-item-missing {
+  font-size: 12px;
+  color: var(--cd-fg-muted);
+}
+
+/* Environment variables. */
+.comfydoctor .cd-envvar-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.comfydoctor .cd-envvar-row {
+  border: 1px solid var(--cd-border);
+  border-radius: 4px;
+  background: var(--cd-surface);
+  padding: 6px 8px;
+  min-width: 0;
+}
+.comfydoctor .cd-envvar-name-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.comfydoctor .cd-envvar-name {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 12px;
+  color: var(--cd-fg);
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+.comfydoctor .cd-envvar-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--cd-fg);
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+.comfydoctor .cd-envvar-missing {
+  font-size: 12px;
+  color: var(--cd-fg-muted);
 }

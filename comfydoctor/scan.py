@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from datetime import datetime, timezone
 
-from . import custom_nodes, env, gpu, inventory
+from . import custom_nodes, env, facts, gpu, inventory
 from .models import ScanResult, health_score
 from .rules import Context, run_all
 
@@ -36,6 +36,11 @@ def scan() -> ScanResult:
         "custom_nodes": nodes.to_dict(),
     }
 
+    # The inventory view: what you have, what you don't, grouped so it reads.
+    # This is the half of v1 worth keeping - being able to see your whole stack
+    # on one screen - rebuilt so that it is actually correct.
+    facts_block = facts.build(e, g, inv)
+
     result = ScanResult(
         findings=findings,
         snapshot=snapshot,
@@ -43,6 +48,7 @@ def scan() -> ScanResult:
         scanned_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         duration_ms=int((time.perf_counter() - t0) * 1000),
         comfy_runtime=ctx.comfy_runtime,
+        facts=facts_block,
     )
     _LAST, _LAST_CTX = result, ctx
     return result

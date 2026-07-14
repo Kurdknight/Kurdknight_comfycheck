@@ -19,6 +19,7 @@ class Severity(str, Enum):
     CRITICAL = "critical"  # ComfyUI is broken or will crash. Fix before anything else.
     ERROR = "error"        # A feature is definitively broken (node won't load, import dies).
     WARNING = "warning"    # Works today, will bite you. Or: silently degraded (CPU torch).
+    TIP = "tip"            # Nothing is wrong - but you could be faster, or fit bigger models.
     INFO = "info"          # Worth knowing. Not a problem.
     OK = "ok"              # Explicitly verified healthy. Shown so users can see what passed.
 
@@ -36,14 +37,20 @@ _SEVERITY_RANK = {
     Severity.CRITICAL: 0,
     Severity.ERROR: 1,
     Severity.WARNING: 2,
-    Severity.INFO: 3,
-    Severity.OK: 4,
+    Severity.TIP: 3,
+    Severity.INFO: 4,
+    Severity.OK: 5,
 }
 
+# A TIP costs nothing. An opportunity you haven't taken is not a defect, and a
+# tool that docks your score for declining an optional speed-up is nagging, not
+# diagnosing. Keeping this line sharp is what stops a health score from decaying
+# into noise people learn to ignore.
 _SEVERITY_WEIGHT = {
     Severity.CRITICAL: 35,
     Severity.ERROR: 8,
     Severity.WARNING: 2,
+    Severity.TIP: 0,
     Severity.INFO: 0,
     Severity.OK: 0,
 }
@@ -100,6 +107,8 @@ class ScanResult:
     scanned_at: str
     duration_ms: int
     comfy_runtime: bool     # False when run from the CLI outside ComfyUI
+    # Grouped inventory for the Environment view (see facts.py)
+    facts: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -113,6 +122,7 @@ class ScanResult:
             "duration_ms": self.duration_ms,
             "comfy_runtime": self.comfy_runtime,
             "counts": self.counts(),
+            "facts": self.facts,
         }
 
     def counts(self) -> dict[str, int]:
