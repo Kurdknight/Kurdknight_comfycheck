@@ -308,11 +308,18 @@ def shadowed_installs(ctx: Context) -> Iterator[Finding]:
 
 @rule
 def contested_module_names(ctx: Context) -> Iterator[Finding]:
-    """Two unrelated distributions both claiming the same import name.
+    """Two distributions that each OWN the same import name.
 
-    Beyond the curated opencv/onnxruntime cases, this catches the ones we've
-    never heard of - which, in an ecosystem where anyone can publish a node with
-    any requirements.txt, is most of them.
+    `ctx.inv.module_owners` only counts a dist as an owner when it ships
+    `<module>/__init__.py`, and that distinction is doing all the work here.
+    google-auth, google-cloud-storage, opentelemetry-sdk, the 14 nvidia-* wheels,
+    jaraco-*, ruamel-* and pyannote-* all write into a shared folder - but none of
+    them owns it. They are PEP 420 namespace packages and the sharing is the
+    entire design. Flagging those means screaming about `import google` on every
+    healthy machine alive.
+
+    opencv-python and opencv-python-headless, by contrast, BOTH ship
+    cv2/__init__.py. That is a real fight over the same files.
     """
     known = set(OPENCV_VARIANTS) | set(ONNX_VARIANTS)
 

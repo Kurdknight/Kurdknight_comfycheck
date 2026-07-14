@@ -36,18 +36,26 @@ def env(windows: bool = True) -> Environment:
     )
 
 
-def dist(name: str, version: str, requires=None, modules=None, location="site-packages") -> Dist:
+def dist(name: str, version: str, requires=None, modules=None, location="site-packages",
+         owned=None) -> Dist:
+    """By default a dist OWNS the modules it provides (it ships their __init__.py),
+    which is the common case. Pass owned=[] to model a namespace contributor -
+    a package that writes into a shared folder without owning it."""
+    mods = modules or [name.replace("-", "_")]
     return Dist(
         name=name, raw_name=name, version=version, location=location,
-        requires=requires or [], modules=modules or [name.replace("-", "_")],
+        requires=requires or [], modules=mods,
+        owned_modules=mods if owned is None else owned,
     )
 
 
 def inv(*dists: Dist, unsatisfied=None) -> Inventory:
     d = {x.name: x for x in dists}
+    # Mirrors build(): a dist only OWNS a module if it ships that module's
+    # __init__.py. Namespace contributors are not owners and never conflict.
     owners: dict[str, list[str]] = {}
     for x in dists:
-        for m in x.modules:
+        for m in x.owned_modules:
             owners.setdefault(m, []).append(x.name)
     return Inventory(dists=d, duplicates={}, module_owners=owners, unsatisfied=unsatisfied or [])
 
@@ -313,6 +321,56 @@ def test_vendored_copies_are_not_shadowed_installs():
     assert _is_vendored("/usr/lib/python3/site-packages/pip/_vendor")
     assert not _is_vendored(r"C:\ComfyUI\python_embeded\Lib\site-packages")
     assert not _is_vendored("/usr/lib/python3/site-packages")
+
+
+def test_namespace_packages_are_not_a_conflict():
+    """Regression, straight off a real user report: google-auth, google-api-core
+    and google-cloud-storage all write into `google/`; 14 nvidia-* wheels write
+    into `nvidia/`; likewise opentelemetry, jaraco, ruamel, pyannote. None of them
+    ships `<mod>/__init__.py` - they are PEP 420 namespace packages and the
+    sharing is deliberate. We were reporting every one of them as a conflict."""
+    ns = [
+        dist("google-auth", "2.49.0", modules=["google"], owned=[]),
+        dist("google-api-core", "2.30.0", modules=["google"], owned=[]),
+        dist("google-cloud-storage", "3.9.0", modules=["google"], owned=[]),
+    ]
+    f = run(inv(dist("torch", "2.6.0+cu124"), *ns), gpu_4090())
+    assert "packages.contested_module.google" not in f
+
+
+def test_two_dists_owning_the_same_module_is_a_real_conflict():
+    """urllib3 and urllib3-future BOTH ship urllib3/__init__.py. Real, keep it."""
+    a = dist("urllib3", "2.6.3", modules=["urllib3"])            # owns urllib3/
+    b = dist("urllib3-future", "2.17.900", modules=["urllib3"])   # also owns urllib3/
+    f = run(inv(dist("torch", "2.6.0+cu124"), a, b), gpu_4090())
+    assert "packages.contested_module.urllib3" in f
+
+
+def test_anonymize_never_corrupts_words_containing_the_username():
+    """Regression from a real Linux report run as root: anonymize() replaced the
+    bare substring "root" everywhere it appeared, rewriting the JSON key
+    "comfy_root" into "comfy_<USER>". It corrupted the data it was meant to
+    protect. Anyone called root/admin/dev/pi would have hit the same thing."""
+    import os
+
+    from comfydoctor.env import anonymize
+
+    old = (os.environ.get("USERNAME"), os.environ.get("USER"))
+    os.environ["USERNAME"] = "root"
+    os.environ["USER"] = "root"
+    try:
+        assert anonymize("comfy_root") == "comfy_root"
+        assert anonymize("torchaudio rootkit") == "torchaudio rootkit"
+        assert anonymize("/home/root/comfy") == "/home/<USER>/comfy"
+        win = "C:" + chr(92) + "Users" + chr(92) + "root" + chr(92) + "comfy"
+        want = "C:" + chr(92) + "Users" + chr(92) + "<USER>" + chr(92) + "comfy"
+        assert anonymize(win) == want
+    finally:
+        for k, v in zip(("USERNAME", "USER"), old):
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
 
 
 # -------------------------------------------------------------------- scoring
