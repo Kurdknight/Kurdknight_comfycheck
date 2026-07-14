@@ -66,6 +66,63 @@ curl -s https://api.comfy.org/nodes/Kurdknight_comfycheck/versions
 
 Should no longer be `[]`.
 
+## Two ways to publish, from now on
+
+### A. Automated (recommended — what publishes today)
+
+Bump `version` in `pyproject.toml`, commit, push to `main`. The GitHub Action
+does the rest. No key on your machine, nothing to remember.
+
+### B. Manual, from your terminal
+
+For publishing without a push, or a quick local release. One-time:
+
+```bash
+pip install comfy-cli
+```
+
+Then, **from inside this node's folder** (the one with `pyproject.toml`):
+
+```bash
+comfy node publish
+```
+
+It prompts for an API key — paste the same `comfy_...` key from the registry
+(or make a fresh one; you can hold several). It zips the node from
+`pyproject.toml` and uploads. Same result as the automated path.
+
+**Either way: bump `version` first.** The registry rejects a duplicate — you
+cannot republish `2.0.1` over `2.0.1`. Versions are immutable and additive:
+publishing `2.0.2` never touches `2.0.1`; both stay downloadable forever.
+
+## Publishing a brand-new node (a different one) later
+
+1. Make the folder with your code + `__init__.py`.
+2. Add a `pyproject.toml` (`comfy node init` scaffolds one):
+
+   ```toml
+   [project]
+   name = "your_new_node_name"   # globally unique — becomes the registry ID and URL. PERMANENT.
+   version = "1.0.0"
+   description = "..."
+   license = { file = "LICENSE" }
+
+   [tool.comfy]
+   PublisherId = "kurdknight"     # ALWAYS this — it's your identity, same on every node you own
+   DisplayName = "Your Node's Nice Name"
+   ```
+3. `comfy node publish` — or drop this repo's `.github/workflows/publish.yml`
+   into the new repo and add its own `REGISTRY_ACCESS_TOKEN` secret.
+
+**The rules that never change:**
+
+- `PublisherId = "kurdknight"` on *every* node — that's how the registry knows
+  it's yours.
+- `name` is permanent, globally unique, and is the URL — choose once, never
+  rename (renaming orphans the node, see below).
+- `DisplayName` is the pretty name; change it freely.
+- Bump `version` on every publish.
+
 ## A trap to avoid
 
 **Do not rename `name` in `pyproject.toml`.** It must stay exactly:
