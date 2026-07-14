@@ -1,0 +1,328 @@
+"""Reports people can actually use.
+
+The old node wrote a .txt into an output folder and told you nothing about where
+it went. Two formats replace it, chosen for what people really do with a
+diagnostic:
+
+  * Markdown - because 90% of the time the next step is pasting it into a GitHub
+    issue or a Discord help channel. It is anonymized, so pasting it does not
+    leak your Windows username, and it leads with the findings rather than 400
+    lines of sys.path.
+  * Self-contained HTML - one file, no assets, opens in any browser, works in
+    both light and dark. For keeping, or for sending to someone who will not
+    read markdown.
+"""
+
+from __future__ import annotations
+
+import html
+import json
+
+from .env import anonymize
+from .models import ScanResult, Severity
+from .models import health_label as _health_label
+
+_LABEL = {
+    Severity.CRITICAL: "CRITICAL",
+    Severity.ERROR: "ERROR",
+    Severity.WARNING: "WARNING",
+    Severity.INFO: "INFO",
+    Severity.OK: "OK",
+}
+
+_EMOJI = {
+    Severity.CRITICAL: "🛑",
+    Severity.ERROR: "❌",
+    Severity.WARNING: "⚠️",
+    Severity.INFO: "ℹ️",
+    Severity.OK: "✅",
+}
+
+
+def health_label(result_or_score) -> str:
+    """Accepts a ScanResult (preferred) or a bare score, for callers that only
+    have the number. The label follows the worst finding, never the arithmetic."""
+    if isinstance(result_or_score, int):
+        return "Healthy" if result_or_score >= 100 else "Minor issues"
+    return _health_label(result_or_score.findings)
+
+
+def to_markdown(result: ScanResult, include_snapshot: bool = True) -> str:
+    """Anonymized, issue-ready. Findings first; raw data folded away at the end."""
+    c = result.counts()
+    out: list[str] = []
+    out.append("## ComfyDoctor report")
+    out.append("")
+    out.append(f"**Health: {result.health}/100 — {health_label(result)}**")
+    out.append("")
+    summary = " · ".join(
+        f"{c[s.value]} {_LABEL[s].lower()}"
+        for s in (Severity.CRITICAL, Severity.ERROR, Severity.WARNING)
+        if c[s.value]
+    )
+    out.append(f"{summary or 'No problems found'} — scanned {result.scanned_at} in {result.duration_ms} ms")
+    if not result.comfy_runtime:
+        out.append("")
+        out.append("> Scanned from the CLI, outside a running ComfyUI, so custom-node import "
+                   "failures could not be observed.")
+    out.append("")
+
+    env = result.snapshot.get("environment", {})
+    gpu = result.snapshot.get("gpu", {})
+    out.append("| | |")
+    out.append("|---|---|")
+    out.append(f"| Python | {env.get('python_version')} ({env.get('kind')}) |")
+    out.append(f"| PyTorch | {gpu.get('torch_version') or 'not installed'} |")
+    out.append(f"| CUDA available | {gpu.get('cuda_available')} |")
+    devs = gpu.get("devices") or []
+    out.append(f"| GPU | {devs[0]['name'] if devs else 'none detected'} |")
+    out.append(f"| Driver | {gpu.get('driver_version') or 'n/a'} |")
+    out.append(f"| OS | {env.get('platform_tag')} |")
+    out.append(f"| Custom nodes | {result.snapshot.get('custom_nodes', {}).get('count', 0)} |")
+    out.append("")
+
+    actionable = [f for f in result.findings if f.severity != Severity.OK]
+    if actionable:
+        out.append("### Findings")
+        out.append("")
+        for f in actionable:
+            out.append(f"#### {_EMOJI[f.severity]} {_LABEL[f.severity]} — {f.title}")
+            out.append("")
+            out.append(f"*{f.category}* · `{f.id}`")
+            out.append("")
+            if f.detail:
+                out.append("```")
+                out.append(anonymize(f.detail))
+                out.append("```")
+                out.append("")
+            if f.impact:
+                out.append(f"**What this means:** {f.impact}")
+                out.append("")
+            if f.remedy:
+                out.append(f"**Fix — {f.remedy.title}**")
+                out.append("")
+                out.append(anonymize(f.remedy.explain))
+                out.append("")
+                for cmd in f.remedy.as_shell():
+                    out.append("```")
+                    out.append(anonymize(cmd))
+                    out.append("```")
+                if f.remedy.danger:
+                    out.append(f"> ⚠️ {f.remedy.danger}")
+                out.append("")
+
+    passed = [f for f in result.findings if f.severity == Severity.OK]
+    if passed:
+        out.append("### Checks that passed")
+        out.append("")
+        for f in passed:
+            out.append(f"- ✅ {f.title}")
+        out.append("")
+
+    if include_snapshot:
+        out.append("<details><summary>Full environment snapshot</summary>")
+        out.append("")
+        out.append("```json")
+        out.append(anonymize(json.dumps(_trim(result.snapshot), indent=1)))
+        out.append("```")
+        out.append("")
+        out.append("</details>")
+
+    out.append("")
+    out.append("<sub>Generated by [ComfyDoctor](https://github.com/Kurdknight/Kurdknight_comfycheck). "
+               "Paths anonymized.</sub>")
+    return "\n".join(out)
+
+
+def _trim(snapshot: dict) -> dict:
+    """Keep the snapshot pasteable. The full package list is 300+ entries and
+    nobody reading your issue wants to scroll past it."""
+    s = json.loads(json.dumps(snapshot))
+    pkgs = s.get("packages", {})
+    if "packages" in pkgs and len(pkgs["packages"]) > 60:
+        pkgs["packages"] = {"_note": f"{len(pkgs['packages'])} packages installed; "
+                                     f"only conflicts are listed above"}
+    nodes = s.get("custom_nodes", {})
+    if isinstance(nodes.get("nodes"), list):
+        nodes["nodes"] = [
+            {"name": n["name"], "loaded": n["loaded"], "requirements": len(n["requirements"])}
+            for n in nodes["nodes"]
+        ]
+    return s
+
+
+def to_html(result: ScanResult) -> str:
+    """One file, no external anything. Light and dark, following the OS."""
+    c = result.counts()
+    label = health_label(result)
+    hue = {"Healthy": "ok", "Minor issues": "warn",
+           "Needs attention": "bad", "Broken": "crit"}.get(label, "warn")
+
+    rows: list[str] = []
+    current_cat = None
+    for f in result.findings:
+        if f.category != current_cat:
+            current_cat = f.category
+            rows.append(f'<h2 class="cat">{html.escape(current_cat)}</h2>')
+
+        sev = f.severity.value
+        rows.append(f'<section class="f {sev}">')
+        rows.append(
+            f'<div class="fh"><span class="chip {sev}">{_LABEL[f.severity]}</span>'
+            f'<h3>{html.escape(f.title)}</h3></div>'
+        )
+        if f.detail:
+            rows.append(f'<pre class="detail">{html.escape(anonymize(f.detail))}</pre>')
+        if f.impact:
+            rows.append(
+                f'<div class="impact"><strong>What this means for you</strong>'
+                f'<p>{html.escape(f.impact)}</p></div>'
+            )
+        if f.remedy:
+            r = f.remedy
+            rows.append('<div class="remedy">')
+            rows.append(f'<strong>{html.escape(r.title)}</strong>')
+            rows.append(f'<p>{html.escape(anonymize(r.explain)).replace(chr(10), "<br>")}</p>')
+            for cmd in r.as_shell():
+                rows.append(f'<pre class="cmd">{html.escape(anonymize(cmd))}</pre>')
+            if r.danger:
+                rows.append(f'<p class="danger">⚠️ {html.escape(r.danger)}</p>')
+            if r.restart_required and r.commands:
+                rows.append('<p class="note">Restart ComfyUI afterwards.</p>')
+            if r.doc_url:
+                rows.append(
+                    f'<p><a href="{html.escape(r.doc_url)}" target="_blank" rel="noopener">'
+                    f'Documentation →</a></p>'
+                )
+            rows.append("</div>")
+        rows.append("</section>")
+
+    env = result.snapshot.get("environment", {})
+    gpu = result.snapshot.get("gpu", {})
+    devs = gpu.get("devices") or []
+    facts = [
+        ("Python", f"{env.get('python_version')} ({env.get('kind')})"),
+        ("PyTorch", gpu.get("torch_version") or "not installed"),
+        ("GPU", devs[0]["name"] if devs else "none detected"),
+        ("Driver", gpu.get("driver_version") or "n/a"),
+        ("CUDA in use", "yes" if gpu.get("cuda_available") else "no"),
+        ("Custom nodes", str(result.snapshot.get("custom_nodes", {}).get("count", 0))),
+    ]
+    fact_html = "".join(
+        f'<div><dt>{html.escape(k)}</dt><dd>{html.escape(anonymize(str(v)))}</dd></div>'
+        for k, v in facts
+    )
+
+    counts_html = " · ".join(
+        f'<span class="chip {s.value}">{c[s.value]} {_LABEL[s].lower()}</span>'
+        for s in Severity if c[s.value]
+    )
+
+    return _HTML_SHELL.format(
+        css=_CSS,
+        health=result.health,
+        label=html.escape(label),
+        hue=hue,
+        counts=counts_html,
+        scanned=html.escape(result.scanned_at),
+        duration=result.duration_ms,
+        facts=fact_html,
+        findings="\n".join(rows),
+        snapshot=html.escape(anonymize(json.dumps(_trim(result.snapshot), indent=1))),
+    )
+
+
+# Both themes, derived from prefers-color-scheme. Flat: no shadows, no gradients.
+# Warm anchor (#c2410c) + cool accent (#0f766e), per-theme variants so nothing is
+# ever dark-on-dark or light-on-light.
+_CSS = """
+:root {
+  --bg:#ffffff; --bg2:#f6f6f5; --fg:#1c1917; --fg2:#57534e; --line:#d6d3d1;
+  --crit:#b91c1c; --err:#c2410c; --warn:#a16207; --info:#0f766e; --ok:#15803d;
+  --code-bg:#f2f1ef; --code-fg:#1c1917;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:#17171a; --bg2:#1f1f23; --fg:#e7e5e4; --fg2:#a8a29e; --line:#3a3a40;
+    --crit:#f87171; --err:#fb923c; --warn:#fbbf24; --info:#5eead4; --ok:#4ade80;
+    --code-bg:#111114; --code-fg:#e7e5e4;
+  }
+}
+* { box-sizing:border-box; }
+body {
+  margin:0; padding:2rem 1.25rem 4rem; background:var(--bg); color:var(--fg);
+  font:15px/1.6 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+main { max-width:820px; margin:0 auto; }
+header { border-bottom:1px solid var(--line); padding-bottom:1.5rem; margin-bottom:1.5rem; }
+.score { display:flex; align-items:baseline; gap:.6rem; }
+.score b { font-size:3.2rem; font-weight:650; line-height:1; font-variant-numeric:tabular-nums; }
+.score .of { color:var(--fg2); font-size:1rem; }
+.score .lab { font-size:1.15rem; font-weight:600; margin-left:.4rem; }
+.score.ok b, .score.ok .lab { color:var(--ok); }
+.score.warn b, .score.warn .lab { color:var(--warn); }
+.score.bad b, .score.bad .lab { color:var(--err); }
+.score.crit b, .score.crit .lab { color:var(--crit); }
+.meta { color:var(--fg2); font-size:.85rem; margin-top:.75rem; }
+dl { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:.75rem 1.5rem;
+     margin:1.25rem 0 0; }
+dl div { border-left:2px solid var(--line); padding-left:.7rem; }
+dt { color:var(--fg2); font-size:.72rem; text-transform:uppercase; letter-spacing:.05em; }
+dd { margin:.15rem 0 0; font-weight:500; word-break:break-word; }
+h2.cat { font-size:.78rem; text-transform:uppercase; letter-spacing:.08em; color:var(--fg2);
+         margin:2.25rem 0 .75rem; font-weight:600; }
+.f { border:1px solid var(--line); border-left-width:3px; border-radius:4px;
+     padding:1rem 1.15rem; margin-bottom:.75rem; background:var(--bg2); }
+.f.critical { border-left-color:var(--crit); }
+.f.error    { border-left-color:var(--err); }
+.f.warning  { border-left-color:var(--warn); }
+.f.info     { border-left-color:var(--info); }
+.f.ok       { border-left-color:var(--ok); }
+.fh { display:flex; align-items:center; gap:.6rem; flex-wrap:wrap; }
+.fh h3 { margin:0; font-size:1.02rem; font-weight:600; }
+.chip { font-size:.65rem; font-weight:700; letter-spacing:.06em; padding:.15rem .4rem;
+        border-radius:3px; border:1px solid currentColor; white-space:nowrap; }
+.chip.critical { color:var(--crit); } .chip.error { color:var(--err); }
+.chip.warning { color:var(--warn); }  .chip.info  { color:var(--info); }
+.chip.ok { color:var(--ok); }
+pre { background:var(--code-bg); color:var(--code-fg); padding:.7rem .85rem; border-radius:4px;
+      overflow-x:auto; font:13px/1.55 ui-monospace,"Cascadia Code",Consolas,monospace;
+      margin:.75rem 0; white-space:pre-wrap; word-break:break-word; }
+pre.cmd { border-left:2px solid var(--info); white-space:pre; }
+.impact { margin-top:.85rem; }
+.impact strong { display:block; font-size:.72rem; text-transform:uppercase; letter-spacing:.05em;
+                 color:var(--fg2); margin-bottom:.2rem; }
+.impact p { margin:0; }
+.remedy { margin-top:1rem; padding-top:.9rem; border-top:1px dashed var(--line); }
+.remedy > strong { color:var(--info); }
+.remedy p { margin:.4rem 0; }
+.danger { color:var(--warn); font-weight:500; }
+.note { color:var(--fg2); font-size:.85rem; }
+a { color:var(--info); }
+details { margin-top:2.5rem; }
+summary { cursor:pointer; color:var(--fg2); font-size:.85rem; }
+footer { margin-top:3rem; padding-top:1rem; border-top:1px solid var(--line);
+         color:var(--fg2); font-size:.8rem; }
+"""
+
+_HTML_SHELL = """<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ComfyDoctor report</title>
+<style>{css}</style>
+<main>
+<header>
+  <div class="score {hue}"><b>{health}</b><span class="of">/100</span><span class="lab">{label}</span></div>
+  <div style="margin-top:.6rem">{counts}</div>
+  <div class="meta">Scanned {scanned} in {duration} ms · paths anonymized</div>
+  <dl>{facts}</dl>
+</header>
+{findings}
+<details>
+  <summary>Full environment snapshot</summary>
+  <pre>{snapshot}</pre>
+</details>
+<footer>Generated by ComfyDoctor. Every path in this file has been anonymized, so it is safe
+to attach to a public issue.</footer>
+</main>
+"""

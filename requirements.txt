@@ -1,0 +1,9 @@
+# Deliberately tiny. A tool that diagnoses dependency conflicts must not be a
+# source of them - so we add nothing that ComfyUI does not already install.
+#
+# Note what is NOT here: no torch. ComfyDoctor never imports torch to inspect it
+# (it reads metadata and shells out), and listing torch in a custom node's
+# requirements is exactly the booby-trap this tool warns you about - pip would
+# resolve it against PyPI's CPU-only wheel and silently replace your CUDA build.
+psutil
+packaging
