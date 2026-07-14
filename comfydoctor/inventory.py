@@ -44,6 +44,19 @@ class Dist:
     location: str | None         # the site dir it lives in
     requires: list[str] = field(default_factory=list)
     modules: list[str] = field(default_factory=list)  # top-level import names it provides
+    # Modules for which this dist ships an actual `<mod>/__init__.py`, i.e. it
+    # OWNS the package rather than merely contributing to a namespace.
+    #
+    # This is the distinction that separates a real conflict from normal Python.
+    # `google-auth`, `google-cloud-storage` and `google-api-core` all put files
+    # under `google/` - that is a PEP 420 namespace package and it is entirely by
+    # design; none of them ships google/__init__.py. Whereas opencv-python and
+    # opencv-python-headless BOTH ship cv2/__init__.py, and they really do
+    # clobber each other.
+    #
+    # Without this test, the tool screams about google, opentelemetry, nvidia,
+    # jaraco, ruamel and pyannote on every healthy machine on earth.
+    owned_modules: list[str] = field(default_factory=list)
 
     @property
     def base_version(self) -> str:
@@ -63,6 +76,7 @@ class Dist:
             "location": self.location,
             "local_tag": self.local_tag,
             "modules": self.modules,
+            "owned_modules": self.owned_modules,
         }
 
 
@@ -70,7 +84,7 @@ class Dist:
 class Inventory:
     dists: dict[str, Dist]                       # canonical name -> Dist (first wins = the one that imports)
     duplicates: dict[str, list[Dist]]            # canonical name -> every copy found, when >1
-    module_owners: dict[str, list[str]]          # import name -> dists claiming it
+    module_owners: dict[str, list[str]]          # import name -> dists that OWN it (ship its __init__.py)
     # The pip-check equivalent. Each entry carries the *parsed* target name, so
     # consumers never have to re-derive it from the requirement string - doing
     # that by hand turns "numpy>=2.0" into a package called "numpy>=2-0".
@@ -140,6 +154,7 @@ def build() -> Inventory:
             location=_location_of(dist),
             requires=list(dist.requires or []),
             modules=_top_level_modules(dist),
+            owned_modules=_owned_modules(dist),
         )
 
         duplicates[name].append(d)
@@ -147,13 +162,12 @@ def build() -> Inventory:
         # name is the one that actually wins an import. Keep that one as truth.
         if name not in dists:
             dists[name] = d
-            for m in d.modules:
-                if name not in module_owners[m]:
-                    module_owners[m].append(name)
-        else:
-            for m in d.modules:
-                if name not in module_owners[m]:
-                    module_owners[m].append(name)
+        # Only OWNED modules count toward a conflict. A dist that merely drops
+        # files into a shared namespace (google/, nvidia/, opentelemetry/) is
+        # not fighting anyone.
+        for m in d.owned_modules:
+            if name not in module_owners[m]:
+                module_owners[m].append(name)
 
     real_dupes = {k: v for k, v in duplicates.items() if len(v) > 1}
     unsat = _check_requirements(dists)
@@ -212,6 +226,28 @@ def _top_level_modules(dist: md.Distribution) -> list[str]:
         except Exception:
             pass
     return sorted(set(mods))
+
+
+def _owned_modules(dist: md.Distribution) -> list[str]:
+    """Top-level packages this dist actually OWNS, i.e. ships `<mod>/__init__.py`.
+
+    Two dists owning the same module = a real, file-clobbering conflict.
+    Two dists merely *contributing* to the same module = a namespace package,
+    which is normal, intentional, and none of our business.
+    """
+    owned: set[str] = set()
+    try:
+        for f in dist.files or []:
+            parts = str(f).replace("\\", "/").split("/")
+            if len(parts) == 2 and parts[1] == "__init__.py":
+                head = parts[0]
+                if not head.startswith((".", "_")) and not head.endswith(
+                    (".dist-info", ".egg-info", ".data")
+                ):
+                    owned.add(head)
+    except Exception:
+        pass
+    return sorted(owned)
 
 
 def _check_requirements(dists: dict[str, Dist]) -> list[dict]:

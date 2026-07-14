@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import platform
+import re
 import sys
 import sysconfig
 from dataclasses import dataclass, field
@@ -151,15 +152,25 @@ def anonymize(text: str) -> str:
 
     Windows users' reports are full of C:\\Users\\<realname>\\... - people either
     hand-edit it out or, more often, just paste it and leak their name.
+
+    The username is only ever replaced when it appears as a *path segment*. An
+    earlier version replaced the bare substring anywhere it occurred, which on a
+    Linux box running as `root` rewrote the JSON key "comfy_root" into
+    "comfy_<USER>" - corrupting the data instead of protecting it. Any user
+    called root, admin, ai, dev or pi would have had the same thing happen to
+    every word containing their name.
     """
     if not text:
         return text
     out = text
+
     home = str(Path.home())
+    if home:
+        out = out.replace(home, "<HOME>").replace(home.replace("\\", "/"), "<HOME>")
+
     user = os.environ.get("USERNAME") or os.environ.get("USER") or ""
-    for needle, mask in ((home, "<HOME>"),):
-        if needle:
-            out = out.replace(needle, mask).replace(needle.replace("\\", "/"), mask)
     if user and len(user) > 2:
-        out = out.replace(user, "<USER>")
+        # Only between path separators (or at a path end) - never mid-word.
+        pattern = r"(?<=[/\\])" + re.escape(user) + r"(?=[/\\]|$|[\"'\s])"
+        out = re.sub(pattern, "<USER>", out)
     return out
