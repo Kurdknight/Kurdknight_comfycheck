@@ -4,7 +4,7 @@
 # kurdknight publisher). Renaming it here would mint a NEW registry node and
 # orphan the existing one along with its stars and its Manager listing.
 name = "Kurdknight_comfycheck"
-version = "2.0.0"
+version = "2.0.1"
 description = "ComfyDoctor - finds what is actually broken in your ComfyUI Python environment (version conflicts, CPU-only torch, failed custom nodes) and gives you a one-click fix. Includes a CLI that still works when ComfyUI won't start."
 license = { file = "LICENSE" }
 requires-python = ">=3.9"
