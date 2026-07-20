@@ -33,6 +33,13 @@ OPENCV_VARIANTS = [
 # Same disease, different package: both write an `onnxruntime` module.
 ONNX_VARIANTS = ["onnxruntime", "onnxruntime-gpu", "onnxruntime-directml", "onnxruntime-openvino"]
 
+# These ship as CUDA wheels from PyTorch's own index. A bare `pip install torch`
+# resolves against PyPI, whose default wheel is CPU-ONLY, and silently replaces
+# a working CUDA build — the single worst thing this tool could ever tell a user
+# to do. Any remedy touching these must pin the PyTorch index, so they are
+# routed to reinstall_torch_stack instead of a bare install command.
+TORCH_FAMILY = {"torch", "torchvision", "torchaudio"}
+
 # Import names too generic to be worth reporting as a "shared module" conflict -
 # lots of packages legitimately ship a `tests` or `docs` folder.
 _NOISY_MODULES = {
@@ -84,6 +91,32 @@ def broken_dependencies(ctx: Context) -> Iterator[Finding]:
         spec = _combined_specifier([u["specifier"] for u in items if u["specifier"]])
         install_arg = f"{target}{spec}" if spec else target
 
+        # torch/vision/audio must NEVER get a bare `pip install` remedy — that
+        # pulls the CPU wheel from PyPI over a working CUDA build. Route them to
+        # the matched-stack reinstall, which pins the correct PyTorch index.
+        if target in TORCH_FAMILY:
+            fix = remedy.reinstall_torch_stack(
+                ctx.env, ctx.gpu,
+                torch_version=ctx.gpu.torch_version if target == "torch" else None,
+                reason=(
+                    f"{target} is what other packages are unsatisfied with. It must be "
+                    f"reinstalled from the PyTorch index (never plain PyPI, which is the "
+                    f"CPU-only wheel), together with its matched torch/vision/audio siblings."
+                ),
+            )
+        else:
+            fix = remedy.install(
+                ctx.env, [install_arg],
+                why=(
+                    (f"Installs {target}{spec}. " if missing else
+                     f"Moves {target} to a version that satisfies all {len(complainers)} of the "
+                     f"packages above at once.\n\n")
+                    + "Re-run the scan afterwards - resolving one conflict sometimes reveals the "
+                      "next one underneath it, and if a new conflict appears in the opposite "
+                      "direction, those two dependants genuinely cannot coexist."
+                ),
+            )
+
         yield Finding(
             id=f"packages.unsatisfied.{target}",
             severity=Severity.ERROR if missing else Severity.WARNING,
@@ -102,17 +135,7 @@ def broken_dependencies(ctx: Context) -> Iterator[Finding]:
             ),
             evidence={"target": target, "installed": installed, "combined_specifier": spec,
                       "requirements": items},
-            remedy=remedy.install(
-                ctx.env, [install_arg],
-                why=(
-                    (f"Installs {target}{spec}. " if missing else
-                     f"Moves {target} to a version that satisfies all {len(complainers)} of the "
-                     f"packages above at once.\n\n")
-                    + "Re-run the scan afterwards - resolving one conflict sometimes reveals the "
-                      "next one underneath it, and if a new conflict appears in the opposite "
-                      "direction, those two dependants genuinely cannot coexist."
-                ),
-            ),
+            remedy=fix,
         )
 
 
@@ -167,7 +190,18 @@ def onnxruntime_pileup(ctx: Context) -> Iterator[Finding]:
     present = [v for v in ONNX_VARIANTS if ctx.inv.has(v)]
     if len(present) < 2:
         return
-    keep = "onnxruntime-gpu" if "onnxruntime-gpu" in present and ctx.gpu.has_nvidia_hardware else present[0]
+    # Keep the build that matches the HARDWARE, not just onnxruntime-gpu. On a
+    # non-NVIDIA machine (AMD/Intel on Windows), onnxruntime-directml / -openvino
+    # IS the GPU path — defaulting to present[0] (often plain CPU onnxruntime)
+    # would uninstall the user's only accelerator and keep the slow one.
+    if "onnxruntime-gpu" in present and ctx.gpu.has_nvidia_hardware:
+        keep = "onnxruntime-gpu"
+    elif not ctx.gpu.has_nvidia_hardware and "onnxruntime-directml" in present:
+        keep = "onnxruntime-directml"
+    elif not ctx.gpu.has_nvidia_hardware and "onnxruntime-openvino" in present:
+        keep = "onnxruntime-openvino"
+    else:
+        keep = present[0]
     drop = [p for p in present if p != keep]
 
     yield Finding(
@@ -215,14 +249,54 @@ def numpy_abi_break(ctx: Context) -> Iterator[Finding]:
 
     from ..inventory import requirement_pins
 
-    blocked: list[tuple[str, str]] = []
+    blocked: list[tuple[str, str]] = []       # want numpy 1.x
+    need_np2: list[tuple[str, str]] = []      # want numpy >= 2
     for name, dist in ctx.inv.dists.items():
         for spec in requirement_pins(dist, "numpy"):
-            if "<2" in spec.replace(" ", ""):
+            flat = spec.replace(" ", "")
+            if "<2" in flat:
                 blocked.append((name, spec))
+                break
+            if ">=2" in flat or ">2" in flat:
+                need_np2.append((name, spec))
                 break
 
     if not blocked:
+        return
+
+    # If OTHER packages require numpy>=2, downgrading to 1.x just breaks THEM
+    # instead — an unwinnable conflict, not a one-click pin. (In 2026 much of the
+    # stack has moved to numpy 2, so this is increasingly the real situation.)
+    # Report it honestly and let the human choose, rather than firing a
+    # destructive ERROR on one side of a genuine standoff.
+    if need_np2:
+        yield Finding(
+            id="packages.numpy2_conflict",
+            severity=Severity.WARNING,
+            category=CAT,
+            title=f"Packages disagree about numpy: {len(blocked)} need 1.x, {len(need_np2)} need 2.x",
+            detail=(
+                "Need numpy 1.x:\n" + "\n".join(f"  - {n} requires numpy{s}" for n, s in blocked[:6])
+                + "\n\nNeed numpy 2.x:\n" + "\n".join(f"  - {n} requires numpy{s}" for n, s in need_np2[:6])
+                + f"\n\nCurrently installed: numpy {np.version}."
+            ),
+            impact=(
+                "No single numpy version satisfies both groups. Pinning numpy<2 would fix the first "
+                "group and break the second; upgrading breaks the first. This is a genuine conflict "
+                "between two nodes, not something a version pin can resolve."
+            ),
+            evidence={"numpy": np.version, "requires_numpy1": dict(blocked),
+                      "requires_numpy2": dict(need_np2)},
+            remedy=remedy.manual(
+                title="Pick which set of nodes you need",
+                explain=(
+                    "Check whether the numpy<2 pins above are stale — many were added defensively "
+                    "in 2024 and the projects have since shipped numpy-2 builds; updating those "
+                    "nodes is the clean fix. If the conflict is real, disable the node you need "
+                    "least. Do NOT blindly pin numpy<2 — it will break the numpy-2 packages listed."
+                ),
+            ),
+        )
         return
 
     yield Finding(
@@ -241,11 +315,10 @@ def numpy_abi_break(ctx: Context) -> Iterator[Finding]:
         remedy=remedy.pin(
             ctx.env, "numpy<2",
             why=(
-                "Pins numpy back to the 1.x series, which everything above was built for. This is "
-                "the standard fix and costs you nothing - almost nothing in the ComfyUI ecosystem "
-                "needs numpy 2 features yet.\n\n"
-                "If a node later demands numpy>=2, check whether the packages listed above have "
-                "shipped numpy-2 builds before you upgrade."
+                "Pins numpy back to the 1.x series, which every package listed above was built "
+                "for. Nothing else you have installed requires numpy 2, so this is safe here.\n\n"
+                "If you later add a node that demands numpy>=2, check whether the packages above "
+                "have shipped numpy-2 builds before you upgrade."
             ),
         ),
     )

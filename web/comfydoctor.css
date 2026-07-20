@@ -878,3 +878,49 @@ body:not(.dark-theme) .comfydoctor {
   font-size: 12px;
   color: var(--cd-fg-muted);
 }
+
+/* ---------------------------------------------------------------------- */
+/* Safety gate — one-click fixes off by default ("at your own risk")       */
+.comfydoctor .cd-safety-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--cd-restart-bg);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.comfydoctor .cd-safety-toggle input {
+  margin-top: 2px;
+  flex: none;
+  cursor: pointer;
+}
+.comfydoctor .cd-safety-sub {
+  opacity: 0.75;
+}
+
+.comfydoctor .cd-safe-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--cd-restart-bg);
+  font-size: 12px;
+  line-height: 1.4;
+  opacity: 0.9;
+}
+
+.comfydoctor .cd-ack-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.comfydoctor .cd-ack-row input { margin-top: 2px; cursor: pointer; }
+.comfydoctor .cd-btn-row .cd-btn[disabled] { opacity: 0.45; cursor: not-allowed; }

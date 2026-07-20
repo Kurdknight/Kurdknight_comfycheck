@@ -20,17 +20,46 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 
-# Minimum NVIDIA driver for each CUDA runtime, from NVIDIA's compatibility table.
-# Only the majors matter in practice; ComfyUI users are on cu118..cu130.
+# Minimum NVIDIA driver for each CUDA runtime.
+#
+# KEY FACT (this table used to get it wrong and false-flag working setups):
+# CUDA has MINOR-VERSION COMPATIBILITY across a major series. A PyTorch wheel
+# built for any CUDA 12.x (cu121..cu129) runs on the CUDA-12.0 driver family —
+# ~525.60 (Linux) / ~528.33 (Windows) — NOT the driver that happened to ship
+# WITH that minor. People run cu124/cu128 torch on 535/550 drivers every day.
+# So every cu12x shares the CUDA-12.0 floor; only a MAJOR bump (cu130 = CUDA 13)
+# raises it. Demanding 570 for cu128 was the same false-positive class as the
+# torchaudio bug: an over-precise number that fires CRITICAL and downgrades.
 CUDA_MIN_DRIVER = {
-    "cu118": (452.39, 450.80),   # (windows, linux)
-    "cu121": (527.41, 525.60),
-    "cu124": (528.33, 525.60),   # 12.x has minor-version compatibility from 525+
+    "cu118": (452.39, 450.80),   # (windows, linux) — CUDA 11.8
+    "cu121": (528.33, 525.60),   # CUDA 12.x major floor (minor-version compat)
+    "cu124": (528.33, 525.60),
     "cu126": (528.33, 525.60),
-    "cu128": (570.00, 570.00),   # CUDA 12.8 needs a 570-series driver
-    "cu129": (570.00, 570.00),
-    "cu130": (580.00, 580.00),
+    "cu128": (528.33, 525.60),
+    "cu129": (528.33, 525.60),
+    "cu130": (580.00, 580.00),   # CUDA 13.x — a real major bump
 }
+
+# Fallback tag when the driver's CUDA version is unknown/unparseable. A
+# middle-of-the-road cu12x wheel runs on any CUDA-12-family driver.
+DEFAULT_CU_TAG = "cu124"
+
+
+def cu_tag_key(tag: str) -> tuple[int, int] | None:
+    """'cu124' -> (12, 4), 'cu130' -> (13, 0). None if unparseable.
+
+    Proper (major, minor) tuples — never the old major*10+minor int encoding,
+    which silently collapses '12.10' and '13.0' into the same number.
+    """
+    m = re.fullmatch(r"cu(\d\d)(\d+)", tag or "")
+    if not m:
+        return None
+    return int(m.group(1)), int(m.group(2))
+
+
+# Newest-first ladder DERIVED from the driver table, so the two can never
+# drift apart when a new CUDA tag is added.
+CUDA_TAG_LADDER = sorted(CUDA_MIN_DRIVER, key=cu_tag_key, reverse=True)
 
 
 @dataclass
@@ -238,17 +267,17 @@ def cuda_tag_for_driver(driver_cuda: str | None, windows: bool) -> str:
     """Best torch cu-tag this driver can actually run. Used to build install
     commands that will not immediately fail."""
     if not driver_cuda:
-        return "cu124"
+        return DEFAULT_CU_TAG
     try:
         major, minor = (driver_cuda.split(".") + ["0"])[:2]
-        v = int(major) * 10 + int(minor)
+        have = (int(major), int(minor))
     except Exception:
-        return "cu124"
-    for tag in ("cu130", "cu129", "cu128", "cu126", "cu124", "cu121", "cu118"):
-        need = int(tag[2:4]) * 10 + int(tag[4:])
-        if v >= need:
+        return DEFAULT_CU_TAG
+    for tag in CUDA_TAG_LADDER:              # newest first
+        need = cu_tag_key(tag)
+        if need and have >= need:
             return tag
-    return "cu118"
+    return CUDA_TAG_LADDER[-1]               # driver older than everything we know
 
 
 def _int(s: str) -> int | None:
