@@ -47,7 +47,12 @@ def cpu_torch_on_gpu_machine(ctx: Context) -> Iterator[Finding]:
         return
 
     tag = ctx.gpu.torch_local_tag or ""
-    cpu_build = tag in ("", "cpu") or not ctx.gpu.torch_cuda_build
+    # torch.version.cuda is the source of truth for "is this a CUDA build?".
+    # A conda-installed CUDA torch reports NO local tag (tag == "") yet has a
+    # real torch_cuda_build like "12.1" — calling that "CPU-only" was wrong and
+    # sent conda users to reinstall over pip. Only an explicit "cpu" tag, or the
+    # genuine absence of a CUDA build, means CPU-only.
+    cpu_build = tag == "cpu" or not ctx.gpu.torch_cuda_build
     gpu_names = ", ".join(d["name"] for d in ctx.gpu.devices)
 
     if cpu_build:
@@ -217,6 +222,11 @@ def triplet_mismatch(ctx: Context) -> Iterator[Finding]:
 @rule
 def driver_too_old(ctx: Context) -> Iterator[Finding]:
     if not ctx.gpu.has_nvidia_hardware or not ctx.gpu.torch_local_tag:
+        return
+    # Reality beats arithmetic: if CUDA actually initialised, the driver is by
+    # definition new enough for this build — never tell someone with a working
+    # GPU to downgrade over a version-number comparison.
+    if ctx.gpu.cuda_available:
         return
     tag = ctx.gpu.torch_local_tag
     if not tag.startswith("cu"):
