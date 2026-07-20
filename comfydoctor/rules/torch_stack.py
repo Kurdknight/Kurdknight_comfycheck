@@ -7,7 +7,7 @@ from typing import Iterator
 from .. import remedy
 from ..gpu import min_driver_for
 from ..models import Finding, Remedy, Severity
-from ..remedy import expected_torchaudio, expected_torchvision
+from ..remedy import expected_torchaudio, expected_torchvision, is_prerelease_torch
 from . import Context, rule
 
 CAT = "PyTorch"
@@ -112,6 +112,37 @@ def triplet_mismatch(ctx: Context) -> Iterator[Finding]:
 
     want_tv = expected_torchvision(torch_d.version)
     want_ta = expected_torchaudio(torch_d.version)
+
+    # Nightly / dev / newer-than-we-know torch: we CANNOT compute a trustworthy
+    # matched version (extrapolating once demanded a torchaudio that doesn't
+    # exist and cost a user their working stack). Don't assert a version here —
+    # the build-tag check below still catches genuinely mixed CUDA builds, which
+    # is version-independent and reliable. Offer a calm, non-destructive note.
+    if is_prerelease_torch(torch_d.version) and (tv or ta):
+        yield Finding(
+            id="torch.triplet_unverified_prerelease",
+            severity=Severity.INFO,
+            category=CAT,
+            title="Can't verify the torch/torchvision/torchaudio pairing (nightly or newer build)",
+            detail=(
+                f"torch {torch_d.version} looks like a nightly/pre-release or is newer than this "
+                f"checker knows about, so there is no published torchvision/torchaudio version to "
+                f"check it against. This is NOT necessarily a problem."
+            ),
+            impact=(
+                "If all three came from the same PyTorch index (the same nightly build), you are "
+                "fine. Only mismatched builds cause ABI errors like `operator torchvision::nms "
+                "does not exist`. Do NOT uninstall anything on the strength of a version number "
+                "alone."
+            ),
+            evidence={
+                "torch": torch_d.version,
+                "torchvision": tv.version if tv else None,
+                "torchaudio": ta.version if ta else None,
+            },
+        )
+        # Skip the version-based mismatch below; fall through to the build-tag check.
+        want_tv = want_ta = None
 
     problems: list[str] = []
     if tv and want_tv and not tv.base_version.startswith(want_tv + "."):
