@@ -17,52 +17,54 @@ from __future__ import annotations
 from .env import Environment
 from .gpu import GPUInfo, cuda_tag_for_driver
 from .models import Remedy
+from .shipped import minor_shipped
 
 TORCH_INDEX = "https://download.pytorch.org/whl/{tag}"
 
-# torchvision and torchaudio track torch on a fixed offset. This has held for
-# every release since torch 2.0 (verified through the torch 2.10 / torchaudio
-# 2.10 line, mid-2026), so we compute it rather than shipping a full table:
+# torchvision and torchaudio track torch on a fixed offset:
 #   torch 2.N  <->  torchvision 0.(N+15)  <->  torchaudio 2.N
+# The formula gives the CANDIDATE pairing; comfydoctor.shipped (live PyPI with
+# a baked fallback) decides whether that candidate ever actually shipped. We
+# only assert a pairing both halves of which exist — this is what killed the
+# "torch 2.13 needs torchaudio 2.13.x" false positive: torch 2.13 is real, but
+# torchaudio froze at 2.11, so the formula's answer must be discarded there.
 TV_OFFSET = 15
-
-# BUT we only ASSERT the pairing for torch minors we know have shipped. The
-# formula is right; extrapolating it onto a torch version newer than any
-# released torchaudio is not. A user on a nightly reporting torch 2.13.0 once
-# got a CRITICAL telling them to install "torchaudio 2.13.x" — a version that
-# does not exist — and uninstalled a working stack over it. Beyond this ceiling
-# we return None (= "can't verify") so no rule invents a requirement. Bump this
-# when a new torch minor ships (and confirm the matching torchaudio exists).
-KNOWN_TORCH_MAX_MINOR = 10
 
 
 def is_prerelease_torch(torch_version: str | None) -> bool:
     """A nightly / dev / rc build (e.g. '2.13.0.dev20260710', '2.9.0rc1', or a
-    minor newer than any shipped release). The stable-release pairing rules do
-    not apply to these — their matched torchvision/torchaudio come from the
-    nightly index and can carry different version numbers."""
+    minor no stable release has ever shipped for). The stable-release pairing
+    rules do not apply to these — their matched torchvision/torchaudio come
+    from the nightly index and can carry different version numbers."""
     if not torch_version:
         return False
     v = torch_version.lower()
     # Local-tag markers (after '+') and pre-release markers (in the base).
     if any(m in v for m in ("+git", "nightly", ".dev", "rc", "a0", "b0")):
         return True
-    mm = _major_minor(torch_version)
-    return bool(mm and mm[0] == 2 and mm[1] > KNOWN_TORCH_MAX_MINOR)
+    return not minor_shipped("torch", _major_minor(torch_version))
 
 
 def expected_torchvision(torch_version: str) -> str | None:
+    """The torchvision series matching this torch — or None when we cannot
+    stand behind an answer (unshipped torch, or the paired torchvision was
+    never released). None means 'can't verify', never 'wrong'."""
     mm = _major_minor(torch_version)
-    if not mm or mm[0] != 2 or mm[1] > KNOWN_TORCH_MAX_MINOR:
+    if not mm or mm[0] != 2 or not minor_shipped("torch", mm):
         return None
-    return f"0.{mm[1] + TV_OFFSET}"
+    want = (0, mm[1] + TV_OFFSET)
+    return f"0.{want[1]}" if minor_shipped("torchvision", want) else None
 
 
 def expected_torchaudio(torch_version: str) -> str | None:
+    """The torchaudio series matching this torch — or None when no such
+    torchaudio ever shipped (it froze at 2.11 while torch kept releasing, so
+    for newer torch there IS no matched version and nothing to demand)."""
     mm = _major_minor(torch_version)
-    if not mm or mm[0] != 2 or mm[1] > KNOWN_TORCH_MAX_MINOR:
+    if not mm or mm[0] != 2 or not minor_shipped("torch", mm):
         return None
-    return f"{mm[0]}.{mm[1]}"
+    want = (2, mm[1])
+    return f"2.{want[1]}" if minor_shipped("torchaudio", want) else None
 
 
 def _major_minor(v: str | None) -> tuple[int, int] | None:
@@ -101,8 +103,12 @@ def reinstall_torch_stack(
     tv = expected_torchvision(v) if v else None
     ta = expected_torchaudio(v) if v else None
 
-    if v and tv and ta:
-        pkgs = [f"torch=={v}", f"torchvision=={tv}.*", f"torchaudio=={ta}.*"]
+    if v and tv:
+        pkgs = [f"torch=={v}", f"torchvision=={tv}.*"]
+        # torchaudio stopped releasing at 2.11; for newer torch there is no
+        # matched version, so install it unpinned and let the index pick the
+        # newest one — never pin to a version we can't confirm exists.
+        pkgs.append(f"torchaudio=={ta}.*" if ta else "torchaudio")
         pin_note = f"pinned to your current torch {v}, so nothing else in your environment shifts"
     else:
         pkgs = ["torch", "torchvision", "torchaudio"]
