@@ -40,6 +40,27 @@ CUDA_MIN_DRIVER = {
     "cu130": (580.00, 580.00),   # CUDA 13.x — a real major bump
 }
 
+# Fallback tag when the driver's CUDA version is unknown/unparseable. A
+# middle-of-the-road cu12x wheel runs on any CUDA-12-family driver.
+DEFAULT_CU_TAG = "cu124"
+
+
+def cu_tag_key(tag: str) -> tuple[int, int] | None:
+    """'cu124' -> (12, 4), 'cu130' -> (13, 0). None if unparseable.
+
+    Proper (major, minor) tuples — never the old major*10+minor int encoding,
+    which silently collapses '12.10' and '13.0' into the same number.
+    """
+    m = re.fullmatch(r"cu(\d\d)(\d+)", tag or "")
+    if not m:
+        return None
+    return int(m.group(1)), int(m.group(2))
+
+
+# Newest-first ladder DERIVED from the driver table, so the two can never
+# drift apart when a new CUDA tag is added.
+CUDA_TAG_LADDER = sorted(CUDA_MIN_DRIVER, key=cu_tag_key, reverse=True)
+
 
 @dataclass
 class GPUInfo:
@@ -246,17 +267,17 @@ def cuda_tag_for_driver(driver_cuda: str | None, windows: bool) -> str:
     """Best torch cu-tag this driver can actually run. Used to build install
     commands that will not immediately fail."""
     if not driver_cuda:
-        return "cu124"
+        return DEFAULT_CU_TAG
     try:
         major, minor = (driver_cuda.split(".") + ["0"])[:2]
-        v = int(major) * 10 + int(minor)
+        have = (int(major), int(minor))
     except Exception:
-        return "cu124"
-    for tag in ("cu130", "cu129", "cu128", "cu126", "cu124", "cu121", "cu118"):
-        need = int(tag[2:4]) * 10 + int(tag[4:])
-        if v >= need:
+        return DEFAULT_CU_TAG
+    for tag in CUDA_TAG_LADDER:              # newest first
+        need = cu_tag_key(tag)
+        if need and have >= need:
             return tag
-    return "cu118"
+    return CUDA_TAG_LADDER[-1]               # driver older than everything we know
 
 
 def _int(s: str) -> int | None:
