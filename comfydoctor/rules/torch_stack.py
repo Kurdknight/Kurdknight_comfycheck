@@ -275,7 +275,10 @@ def driver_too_old(ctx: Context) -> Iterator[Finding]:
 
 
 def _older_tag(tag: str) -> str:
-    ladder = ["cu118", "cu121", "cu124", "cu126", "cu128", "cu129", "cu130"]
+    # Oldest-first ladder derived from the single source of truth in gpu.py,
+    # so adding a new CUDA tag there automatically updates this rule too.
+    from ..gpu import CUDA_TAG_LADDER
+    ladder = list(reversed(CUDA_TAG_LADDER))
     try:
         i = ladder.index(tag)
     except ValueError:
