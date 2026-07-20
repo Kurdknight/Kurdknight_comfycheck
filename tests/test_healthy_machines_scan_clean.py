@@ -133,11 +133,33 @@ class TestHealthyMachinesScanClean:
         _assert_clean(_ctx(_env(windows=False, kind="venv"), gpu, dists),
                       "Linux venv + cu128 torch on driver 550")
 
-    def test_nightly_torch_same_index(self):
-        # The reported case: torch nightly newer than any released torchaudio.
-        # Used to fire CRITICAL 'needs torchaudio 2.13.x' (nonexistent).
+    def test_the_reddit_machine(self):
+        # THE reported case, verbatim: torch 2.13.0+cu130 with torchaudio
+        # 2.11.0+cu130. torchaudio froze at 2.11 while torch kept releasing —
+        # this IS the correct, current pairing, and the tool told the user to
+        # install "torchaudio 2.13.x" (nonexistent) at CRITICAL.
         gpu = _gpu_cuda(tag="cu130", torch_v="2.13.0", cuda_build="13.0", driver="581.00")
-        dists = _matched_stack(torch_v="2.13.0", tag="cu130", tv="0.28.0", ta="2.13.0")
+        dists = [
+            _dist("torch", "2.13.0+cu130"),
+            _dist("torchvision", "0.28.0+cu130"),
+            _dist("torchaudio", "2.11.0+cu130"),
+            _dist("numpy", "1.26.4"),
+            _dist("pillow", "10.4.0"),
+        ]
+        _assert_clean(_ctx(_env(windows=True), gpu, dists),
+                      "torch 2.13 + frozen torchaudio 2.11 (the Reddit machine)")
+
+    def test_true_nightly_torch_same_index(self):
+        # A real nightly stack: dev-versioned everything from one index.
+        gpu = _gpu_cuda(tag="cu130", torch_v="2.14.0.dev20260715", cuda_build="13.0",
+                        driver="581.00")
+        gpu.torch_version = "2.14.0.dev20260715+cu130"
+        dists = [
+            _dist("torch", "2.14.0.dev20260715+cu130"),
+            _dist("torchvision", "0.29.0.dev20260715+cu130"),
+            _dist("torchaudio", "2.11.0.dev20260715+cu130"),
+            _dist("numpy", "1.26.4"),
+        ]
         _assert_clean(_ctx(_env(windows=True), gpu, dists),
                       "nightly torch stack from one index")
 
