@@ -20,16 +20,24 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 
-# Minimum NVIDIA driver for each CUDA runtime, from NVIDIA's compatibility table.
-# Only the majors matter in practice; ComfyUI users are on cu118..cu130.
+# Minimum NVIDIA driver for each CUDA runtime.
+#
+# KEY FACT (this table used to get it wrong and false-flag working setups):
+# CUDA has MINOR-VERSION COMPATIBILITY across a major series. A PyTorch wheel
+# built for any CUDA 12.x (cu121..cu129) runs on the CUDA-12.0 driver family —
+# ~525.60 (Linux) / ~528.33 (Windows) — NOT the driver that happened to ship
+# WITH that minor. People run cu124/cu128 torch on 535/550 drivers every day.
+# So every cu12x shares the CUDA-12.0 floor; only a MAJOR bump (cu130 = CUDA 13)
+# raises it. Demanding 570 for cu128 was the same false-positive class as the
+# torchaudio bug: an over-precise number that fires CRITICAL and downgrades.
 CUDA_MIN_DRIVER = {
-    "cu118": (452.39, 450.80),   # (windows, linux)
-    "cu121": (527.41, 525.60),
-    "cu124": (528.33, 525.60),   # 12.x has minor-version compatibility from 525+
+    "cu118": (452.39, 450.80),   # (windows, linux) — CUDA 11.8
+    "cu121": (528.33, 525.60),   # CUDA 12.x major floor (minor-version compat)
+    "cu124": (528.33, 525.60),
     "cu126": (528.33, 525.60),
-    "cu128": (570.00, 570.00),   # CUDA 12.8 needs a 570-series driver
-    "cu129": (570.00, 570.00),
-    "cu130": (580.00, 580.00),
+    "cu128": (528.33, 525.60),
+    "cu129": (528.33, 525.60),
+    "cu130": (580.00, 580.00),   # CUDA 13.x — a real major bump
 }
 
 

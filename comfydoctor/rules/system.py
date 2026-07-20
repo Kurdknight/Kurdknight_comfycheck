@@ -15,7 +15,10 @@ CAT = "System"
 
 # ComfyUI itself runs on 3.13, but a large share of the custom-node ecosystem
 # still ships wheels only up to 3.12. 3.10-3.12 is the sweet spot.
-PY_SWEET_SPOT = ((3, 10), (3, 12))
+# ComfyUI officially runs on 3.13 (mid-2026), so it belongs INSIDE the range —
+# warning on the interpreter the project itself recommends was a false alarm.
+# 3.14+ is still genuinely ahead of most compiled wheels, so it still warns.
+PY_SWEET_SPOT = ((3, 10), (3, 13))
 
 
 @rule

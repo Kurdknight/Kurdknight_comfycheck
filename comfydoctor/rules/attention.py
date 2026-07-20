@@ -27,6 +27,25 @@ CAT = "Attention backends"
 ABI_BOUND = ["xformers", "flash-attn", "sageattention", "natten", "causal-conv1d", "mamba-ssm"]
 
 
+def _is_lower_bound_only(spec: str) -> bool:
+    """True when a torch pin is ONLY a minimum (>= / >), with no upper bound or
+    exact/exclusion operator. An unmet lower bound means torch is too OLD — that
+    is an UPGRADE, not an ABI break, and uninstalling the package is the wrong
+    fix. A real ABI ceiling uses ==, ~=, <, <=, or != and is handled normally.
+    """
+    ops = re.findall(r"(===|==|~=|!=|<=|>=|<|>)", spec or "")
+    return bool(ops) and all(o in (">", ">=") for o in ops)
+
+
+def _mm(v: str | None) -> str | None:
+    """'2.9.1' / '2.9.1.post5' -> '2.9'. Patch/post differences do NOT break the
+    torch ABI, so the build-tag check must compare only major.minor."""
+    if not v:
+        return None
+    parts = v.split(".")
+    return f"{parts[0]}.{parts[1]}" if len(parts) >= 2 else v
+
+
 @rule
 def abi_pin_mismatch(ctx: Context) -> Iterator[Finding]:
     torch_d = ctx.inv.get("torch")
@@ -42,6 +61,11 @@ def abi_pin_mismatch(ctx: Context) -> Iterator[Finding]:
         for spec in pins:
             ok = satisfies(torch_d.version, spec)
             if ok is not False:
+                continue
+            # A purely lower-bound pin that isn't met means torch is too OLD, not
+            # that the package is ABI-broken. Don't tell people to uninstall a
+            # working accelerator over an upgrade suggestion.
+            if _is_lower_bound_only(spec):
                 continue
             yield Finding(
                 id=f"attention.{pkg}.torch_pin_mismatch",
@@ -91,9 +115,12 @@ def abi_pin_mismatch(ctx: Context) -> Iterator[Finding]:
         # Naive string equality against torch's own "cu130" calls that a
         # mismatch when it is in fact a perfect match.
         cuda_bad = pkg_cuda is not None and pkg_cuda != torch_cuda
+        # Compare only major.minor: a wheel built for torch2.9.1 runs fine on
+        # torch 2.9.0 (patch releases keep the ABI). Comparing the full version
+        # false-flagged every patch-level difference and told people to uninstall.
         torch_bad = (
             pkg_torch is not None
-            and not torch_d.base_version.startswith(pkg_torch)
+            and _mm(pkg_torch) != _mm(torch_d.base_version)
         )
         if not cuda_bad and not torch_bad:
             continue
