@@ -109,6 +109,13 @@ def node_requirements_unmet(ctx: Context) -> Iterator[Finding]:
     for node_name, items in sorted(by_node.items()):
         req_path = next((n.path / "requirements.txt" for n in ctx.nodes.nodes
                          if n.name == node_name), None)
+        # Same guard as failed_imports: if this node's unmet requirements include
+        # torch/vision/audio, `pip install -r requirements.txt` can pull the
+        # CPU wheel over a working CUDA build. Warn loudly instead of handing over
+        # a silent GPU-killer.
+        touches_torch = any(
+            (i.get("package") or "") in ("torch", "torchvision", "torchaudio") for i in items
+        )
         yield Finding(
             id=f"nodes.requirements_unmet.{node_name}",
             severity=Severity.WARNING,
@@ -125,6 +132,13 @@ def node_requirements_unmet(ctx: Context) -> Iterator[Finding]:
                 commands=[ctx.env.pip_argv("install", "-r", str(req_path))],
                 explain=(
                     "Installs this node's requirements into the interpreter ComfyUI is really using."
+                ),
+                danger=(
+                    "This node's requirements mention torch. Running this can replace your CUDA "
+                    "PyTorch with a CPU-only build from PyPI and silently kill GPU acceleration. "
+                    "Open the requirements.txt first; if it lists torch/torchvision/torchaudio, "
+                    "install the OTHER packages by hand instead."
+                    if touches_torch else None
                 ),
             ) if req_path and req_path.is_file() else None,
         )

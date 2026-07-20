@@ -21,22 +21,46 @@ from .models import Remedy
 TORCH_INDEX = "https://download.pytorch.org/whl/{tag}"
 
 # torchvision and torchaudio track torch on a fixed offset. This has held for
-# every release since torch 2.0, so we compute it rather than shipping a table
-# that goes stale the week after release:
+# every release since torch 2.0 (verified through the torch 2.10 / torchaudio
+# 2.10 line, mid-2026), so we compute it rather than shipping a full table:
 #   torch 2.N  <->  torchvision 0.(N+15)  <->  torchaudio 2.N
 TV_OFFSET = 15
+
+# BUT we only ASSERT the pairing for torch minors we know have shipped. The
+# formula is right; extrapolating it onto a torch version newer than any
+# released torchaudio is not. A user on a nightly reporting torch 2.13.0 once
+# got a CRITICAL telling them to install "torchaudio 2.13.x" — a version that
+# does not exist — and uninstalled a working stack over it. Beyond this ceiling
+# we return None (= "can't verify") so no rule invents a requirement. Bump this
+# when a new torch minor ships (and confirm the matching torchaudio exists).
+KNOWN_TORCH_MAX_MINOR = 10
+
+
+def is_prerelease_torch(torch_version: str | None) -> bool:
+    """A nightly / dev / rc build (e.g. '2.13.0.dev20260710', '2.9.0rc1', or a
+    minor newer than any shipped release). The stable-release pairing rules do
+    not apply to these — their matched torchvision/torchaudio come from the
+    nightly index and can carry different version numbers."""
+    if not torch_version:
+        return False
+    v = torch_version.lower()
+    # Local-tag markers (after '+') and pre-release markers (in the base).
+    if any(m in v for m in ("+git", "nightly", ".dev", "rc", "a0", "b0")):
+        return True
+    mm = _major_minor(torch_version)
+    return bool(mm and mm[0] == 2 and mm[1] > KNOWN_TORCH_MAX_MINOR)
 
 
 def expected_torchvision(torch_version: str) -> str | None:
     mm = _major_minor(torch_version)
-    if not mm or mm[0] != 2:
+    if not mm or mm[0] != 2 or mm[1] > KNOWN_TORCH_MAX_MINOR:
         return None
     return f"0.{mm[1] + TV_OFFSET}"
 
 
 def expected_torchaudio(torch_version: str) -> str | None:
     mm = _major_minor(torch_version)
-    if not mm:
+    if not mm or mm[0] != 2 or mm[1] > KNOWN_TORCH_MAX_MINOR:
         return None
     return f"{mm[0]}.{mm[1]}"
 

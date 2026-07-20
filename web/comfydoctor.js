@@ -122,6 +122,27 @@ function countsPhrase(counts) {
 }
 
 // ---------------------------------------------------------------------------
+// Safety gate for one-click fixes.
+//
+// Default OFF: every remedy still shows its exact command(s) with a Copy
+// button — full transparency — but nothing is runnable from the UI until the
+// user flips the "at your own risk" toggle in the header. A diagnostic tool
+// that is ever wrong (and any will be, eventually) must not hand out a loaded
+// one-click button by default; the person who copies a command into their own
+// terminal at least reads it first.
+// ---------------------------------------------------------------------------
+
+const FIXES_KEY = "comfydoctor.oneClickFixes";
+
+function fixesEnabled() {
+  try { return localStorage.getItem(FIXES_KEY) === "1"; } catch (e) { return false; }
+}
+
+function setFixesEnabled(on) {
+  try { localStorage.setItem(FIXES_KEY, on ? "1" : "0"); } catch (e) { /* private mode */ }
+}
+
+// ---------------------------------------------------------------------------
 // Remedy block — title/explain/commands + the fix -> confirm -> run flow
 // ---------------------------------------------------------------------------
 
@@ -176,7 +197,20 @@ function buildRemedyBlock(finding, ctx) {
 
     if (view === "idle") {
       if (remedy.runnable) {
-        wrap.appendChild(iconButton("pi-wrench", "Fix this", () => { view = "confirm"; render(); }, "cd-btn-primary"));
+        if (fixesEnabled()) {
+          wrap.appendChild(iconButton("pi-wrench", "Fix this", () => { view = "confirm"; render(); }, "cd-btn-primary"));
+        } else {
+          wrap.appendChild(
+            el("div", { class: "cd-safe-note" }, [
+              icon("pi-lock"),
+              el("span", {
+                text:
+                  "One-click fixes are off. Copy the command above and run it yourself, " +
+                  "or enable fixes in the header — at your own risk.",
+              }),
+            ])
+          );
+        }
       }
       return;
     }
@@ -189,13 +223,28 @@ function buildRemedyBlock(finding, ctx) {
           el("div", { class: "cd-restart-note" }, [icon("pi-info-circle"), el("span", { text: "ComfyUI will need a restart afterwards." })])
         );
       }
+      // A dangerous remedy (can change the torch stack, uninstall packages…)
+      // additionally requires an explicit acknowledgement before Run unlocks.
+      let ackOk = !remedy.danger;
+      let runBtn;
       if (remedy.danger) {
         box.appendChild(
           el("div", { class: "cd-danger-box" }, [icon("pi-exclamation-triangle"), el("span", { text: remedy.danger })])
         );
+        const ackRow = el("label", { class: "cd-ack-row" });
+        const ackBox = el("input", { type: "checkbox" });
+        ackBox.addEventListener("change", () => {
+          ackOk = ackBox.checked;
+          if (runBtn) runBtn.disabled = !ackOk;
+        });
+        ackRow.appendChild(ackBox);
+        ackRow.appendChild(el("span", { text: "I read the warning above and accept the risk." }));
+        box.appendChild(ackRow);
       }
       const btnRow = el("div", { class: "cd-btn-row" });
-      btnRow.appendChild(iconButton("pi-check", "Run it", () => startFix(), "cd-btn-primary"));
+      runBtn = iconButton("pi-check", "Run it", () => startFix(), "cd-btn-primary");
+      runBtn.disabled = !ackOk;
+      btnRow.appendChild(runBtn);
       btnRow.appendChild(iconButton("pi-times", "Cancel", () => { view = "idle"; render(); }));
       box.appendChild(btnRow);
       wrap.appendChild(box);
@@ -640,6 +689,26 @@ function buildHeader(data, ctx) {
   btnRow.appendChild(iconButton("pi-download", "Download HTML", () => downloadHtml()));
   header.appendChild(btnRow);
 
+  // Safety gate: one-click fixes are OFF by default. Commands are always
+  // visible and copyable; this toggle only controls whether the UI itself may
+  // run them.
+  const safety = el("label", { class: "cd-safety-toggle" });
+  const box = el("input", { type: "checkbox" });
+  box.checked = fixesEnabled();
+  box.addEventListener("change", () => {
+    setFixesEnabled(box.checked);
+    if (ctx.rerender) ctx.rerender();
+  });
+  safety.appendChild(box);
+  const safetyText = el("span", { class: "cd-safety-text" });
+  safetyText.appendChild(el("strong", { text: "Enable one-click fixes" }));
+  safetyText.appendChild(el("span", {
+    class: "cd-safety-sub",
+    text: " — at your own risk. Off: commands are shown to copy and run yourself.",
+  }));
+  safety.appendChild(safetyText);
+  header.appendChild(safety);
+
   return header;
 }
 
@@ -752,6 +821,7 @@ app.registerExtension({
         }
 
         ctx.scan = scan;
+        ctx.rerender = update;
         scan();
 
         return () => {
