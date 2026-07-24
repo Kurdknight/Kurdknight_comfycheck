@@ -73,6 +73,8 @@ def broken_dependencies(ctx: Context) -> Iterator[Finding]:
     for u in ctx.inv.unsatisfied:
         by_target[u["target"]].append(u)
 
+    from ..inventory import requirement_pins
+
     for target, items in sorted(by_target.items(), key=lambda kv: -len(kv[1])):
         complainers = sorted({u["dist"] for u in items})
         installed = ctx.inv.version(target)
@@ -84,11 +86,37 @@ def broken_dependencies(ctx: Context) -> Iterator[Finding]:
         if not missing:
             lines.insert(0, f"  installed: {target} {installed}")
 
+        # THE "will this fix break something else?" guard: every OTHER installed
+        # package's declared pin on this target joins the install specifier too
+        # — not just the complainers'. That makes pip itself the verifier: the
+        # command can never satisfy one package by violating another's declared
+        # requirement, and if the pins genuinely contradict, pip refuses up
+        # front and installs nothing. (Undeclared needs can still exist — which
+        # is why the remedy also says that doing nothing is a valid choice on a
+        # working machine.)
+        bystander_pins: list[tuple[str, str]] = []
+        for name, dist in ctx.inv.dists.items():
+            if name == target or name in complainers:
+                continue
+            for pin in requirement_pins(dist, target):
+                bystander_pins.append((name, pin))
+
+        if bystander_pins and not missing:
+            shown = sorted({n for n, _ in bystander_pins})
+            lines.append(
+                f"  also pinned by {len(shown)} other package(s) "
+                f"({', '.join(shown[:5])}{'...' if len(shown) > 5 else ''}) - "
+                f"the fix respects their pins too"
+            )
+
         # Combine every specifier so the install command asks for a version that
         # satisfies ALL the complainers at once, not just the last one we saw.
         # `pip install "numpy>=2,<3"` beats a bare `--upgrade numpy` that might
         # sail straight past someone else's upper bound.
-        spec = _combined_specifier([u["specifier"] for u in items if u["specifier"]])
+        spec = _combined_specifier(
+            [u["specifier"] for u in items if u["specifier"]]
+            + [p for _, p in bystander_pins]
+        )
         install_arg = f"{target}{spec}" if spec else target
 
         # torch/vision/audio must NEVER get a bare `pip install` remedy — that
@@ -104,16 +132,33 @@ def broken_dependencies(ctx: Context) -> Iterator[Finding]:
                     f"CPU-only wheel), together with its matched torch/vision/audio siblings."
                 ),
             )
-        else:
+        elif missing:
             fix = remedy.install(
                 ctx.env, [install_arg],
                 why=(
-                    (f"Installs {target}{spec}. " if missing else
-                     f"Moves {target} to a version that satisfies all {len(complainers)} of the "
-                     f"packages above at once.\n\n")
-                    + "Re-run the scan afterwards - resolving one conflict sometimes reveals the "
-                      "next one underneath it, and if a new conflict appears in the opposite "
-                      "direction, those two dependants genuinely cannot coexist."
+                    f"Installs {target}{spec}. Re-run the scan afterwards - resolving one "
+                    f"conflict sometimes reveals the next one underneath it."
+                ),
+            )
+        else:
+            fix = remedy.Remedy(
+                title=f"Install {install_arg}",
+                commands=[ctx.env.pip_argv("install", install_arg)],
+                explain=(
+                    f"Moves {target} to a version that satisfies all {len(complainers)} "
+                    f"complaining package(s) at once - AND every other installed package's "
+                    f"declared pin on {target}, which is baked into the command. If no such "
+                    f"version exists, pip refuses and changes nothing; that would mean these "
+                    f"packages genuinely cannot coexist, and no version change can help.\n\n"
+                    f"Re-run the scan afterwards - resolving one conflict sometimes reveals "
+                    f"the next one underneath it."
+                ),
+                danger=(
+                    f"This moves a shared library that other packages also use. Declared "
+                    f"requirements are respected automatically, but a package can rely on "
+                    f"behaviour it never declared. If the nodes that use "
+                    f"{', '.join(complainers[:3])} currently work, the pin above may simply "
+                    f"be stale caution - doing nothing is also a valid choice."
                 ),
             )
 
