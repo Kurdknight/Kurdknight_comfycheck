@@ -200,6 +200,19 @@ class TestHealthyMachinesScanClean:
         _assert_clean(_ctx(_env(windows=True), gpu, dists),
                       "numpy 2 environment with numpy>=2 consumers")
 
+    def test_numpy2_satisfied_upper_bound_is_not_a_numpy1_pin(self):
+        # numba-style `numpy>=1.24,<2.3` is SATISFIED by numpy 2.1. The old
+        # substring test ("<2" in spec) read it as a numpy-1.x requirement and
+        # pushed a downgrade remedy on a healthy machine — specifiers must be
+        # evaluated, never string-matched.
+        gpu = _gpu_cuda()
+        dists = [d for d in _matched_stack() if d.name != "numpy"]
+        dists.append(_dist("numpy", "2.1.0"))
+        dists.append(_dist("numba", "0.61.0", requires=["numpy >=1.24,<2.3"]))
+        dists.append(_dist("scipy", "1.14.0", requires=["numpy>=1.23.5,<2.5"]))
+        _assert_clean(_ctx(_env(windows=True), gpu, dists),
+                      "numpy 2.1 with satisfied upper-bounded pins (numba/scipy style)")
+
 
 class TestKnownConflictsStillCaught:
     """The guard must not have lobotomized the tool: REAL problems still fire."""
@@ -233,3 +246,31 @@ class TestKnownConflictsStillCaught:
         dists = _matched_stack()
         bad = _bad_findings(_ctx(_env(windows=False), gpu, dists))
         assert any(f.id in ("torch.driver_too_old", "torch.cuda_unavailable") for f in bad)
+
+    def test_real_numpy1_pin_still_errors(self):
+        # A genuine numpy<2 requirement with numpy 2.x installed is the real
+        # ABI break and must still fire.
+        gpu = _gpu_cuda()
+        dists = [d for d in _matched_stack() if d.name != "numpy"]
+        dists.append(_dist("numpy", "2.1.0"))
+        dists.append(_dist("insightface", "0.7.3", requires=["numpy<2"]))
+        bad = _bad_findings(_ctx(_env(windows=True), gpu, dists))
+        assert any(f.id == "packages.numpy2_abi" for f in bad), \
+            "a real numpy<2 pin against numpy 2.x must still be flagged"
+
+    def test_numpy_standoff_reported_not_downgraded(self):
+        # One package needs 1.x, another rejects 1.x: report the standoff as a
+        # WARNING — never the one-sided ERROR whose remedy pins numpy<2.
+        import collections
+        gpu = _gpu_cuda()
+        dists = [d for d in _matched_stack() if d.name != "numpy"]
+        dists.append(_dist("numpy", "2.1.0"))
+        dists.append(_dist("insightface", "0.7.3", requires=["numpy<2"]))
+        dists.append(_dist("scipy", "1.14.0", requires=["numpy>=2.0"]))
+        du = collections.namedtuple("usage", "total used free")(
+            total=2_000_000_000_000, used=800_000_000_000, free=1_200_000_000_000)
+        with patch("shutil.disk_usage", return_value=du):
+            findings = run_all(_ctx(_env(windows=True), gpu, dists))
+        ids = {f.id for f in findings}
+        assert "packages.numpy2_conflict" in ids
+        assert "packages.numpy2_abi" not in ids

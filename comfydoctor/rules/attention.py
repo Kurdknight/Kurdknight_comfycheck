@@ -168,9 +168,22 @@ def _torch_of(tag: str | None) -> str | None:
     return m.group(1) if m else None
 
 
+def _ships_windows_binaries(dist_name: str) -> bool:
+    """Does the installed dist actually contain Windows binaries (.pyd)?
+    Metadata-only — never imports. This is the reality check that keeps rules
+    from asserting ecosystem facts ("no Windows wheels exist") that can rot."""
+    try:
+        from importlib import metadata as md
+
+        return any(str(f).endswith(".pyd") for f in (md.distribution(dist_name).files or []))
+    except Exception:
+        return False
+
+
 @rule
 def triton_on_windows(ctx: Context) -> Iterator[Finding]:
-    """`triton` proper has no Windows wheels. Windows users need triton-windows.
+    """`triton` proper has no Windows wheels (as of 2026). Windows users need
+    triton-windows.
 
     People install `triton` on Windows because a node's requirements.txt asks for
     it, pip finds *something*, and then every torch.compile path explodes.
@@ -180,6 +193,11 @@ def triton_on_windows(ctx: Context) -> Iterator[Finding]:
     t = ctx.inv.get("triton")
     tw = ctx.inv.get("triton-windows")
     if not t or tw:
+        return
+    # Believe the files on disk over our own claim: if this triton actually
+    # ships Windows binaries, upstream has started publishing Windows wheels
+    # and the premise of this warning is gone.
+    if _ships_windows_binaries("triton"):
         return
     yield Finding(
         id="attention.triton_linux_wheel_on_windows",
