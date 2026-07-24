@@ -67,9 +67,19 @@ async function copyText(text, btn) {
   }
 }
 
-/** Join an argv array into a shell-ish display string, quoting args with spaces. */
+/** Join an argv array into a copy-pasteable shell string. Quotes any argument
+ *  containing shell metacharacters — not just spaces. `<` and `>` matter most:
+ *  a pip specifier like `numpy<3,>=2.0` pasted unquoted into a terminal becomes
+ *  a redirect and truncates a file instead of installing anything. Mirrors the
+ *  server-side quoting in models.py so the two copy paths can never disagree. */
+const SHELL_META = /[ \t"'<>|&;$()`*?[\]{}#!~^%]/;
 function formatCommand(argv) {
-  return argv.map((a) => (String(a).includes(" ") ? `"${a}"` : String(a))).join(" ");
+  return argv
+    .map((a) => {
+      const s = String(a);
+      return SHELL_META.test(s) || s === "" ? `"${s.replace(/"/g, '\\"')}"` : s;
+    })
+    .join(" ");
 }
 
 function apiUrl(path) {
@@ -101,7 +111,15 @@ function healthLabel(score, data) {
   return "Broken";
 }
 
-function healthTier(score) {
+function healthTier(score, data) {
+  // The colour must agree with the LABEL (worst finding), not the number —
+  // otherwise "85 Needs attention" renders with a reassuring yellow circle.
+  const label = data && data.health_label;
+  if (label) {
+    return (
+      { Healthy: "ok", "Minor issues": "minor", "Needs attention": "attention", Broken: "broken" }[label] || "minor"
+    );
+  }
   if (score >= 100) return "ok";
   if (score >= 80) return "minor";
   if (score >= 60) return "attention";
@@ -655,7 +673,7 @@ function downloadHtml() {
 function buildHeader(data, ctx) {
   const header = el("div", { class: "cd-header" });
 
-  const tier = healthTier(data.health);
+  const tier = healthTier(data.health, data);
   const scoreRow = el("div", { class: "cd-score-row" });
   const scoreCircle = el("div", { class: `cd-score cd-score--${tier}` });
   scoreCircle.appendChild(el("span", { class: "cd-score-num", text: String(Math.round(data.health)) }));
