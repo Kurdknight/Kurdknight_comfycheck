@@ -154,14 +154,26 @@ def _combined_specifier(specs: list[str]) -> str:
         return specs[0]
 
 
+# Order of preference when collapsing an OpenCV pile-up. contrib is a strict
+# SUPERSET of plain (all main modules + the contrib extras like ximgproc that
+# controlnet_aux and friends import), so keeping plain when contrib is present
+# would break every node that touches a contrib module. Headless last: it's
+# for servers, and desktop nodes may want the GUI bits.
+_OPENCV_KEEP_ORDER = [
+    "opencv-contrib-python",
+    "opencv-python",
+    "opencv-contrib-python-headless",
+    "opencv-python-headless",
+]
+
+
 @rule
 def opencv_pileup(ctx: Context) -> Iterator[Finding]:
     present = [v for v in OPENCV_VARIANTS if ctx.inv.has(v)]
     if len(present) < 2:
         return
 
-    # Prefer the plain package on desktop; headless is for servers with no GUI.
-    keep = "opencv-python" if "opencv-python" in present else present[0]
+    keep = next((p for p in _OPENCV_KEEP_ORDER if p in present), present[0])
     drop = [p for p in present if p != keep]
 
     yield Finding(
@@ -204,6 +216,21 @@ def onnxruntime_pileup(ctx: Context) -> Iterator[Finding]:
         keep = present[0]
     drop = [p for p in present if p != keep]
 
+    # A dev/rc build of the keeper was almost certainly installed on purpose
+    # from a special index (e.g. the ORT nightly feed for a new CUDA major).
+    # Plain `pip install` would replace it with the latest STABLE from PyPI,
+    # which may not support that CUDA yet — trading slow-but-working for
+    # broken. Say so instead of silently downgrading.
+    keep_ver = parse_version(ctx.inv.version(keep))
+    danger = "Between the two commands, onnxruntime will not exist. Let it finish."
+    if keep_ver is not None and keep_ver.is_prerelease:
+        danger += (
+            f" Also: your current {keep} {ctx.inv.version(keep)} is a PRE-RELEASE build, "
+            f"probably installed from a nightly index on purpose (new CUDA support). This "
+            f"command reinstalls the latest stable from PyPI instead. If a node afterwards "
+            f"reports 'no CUDAExecutionProvider', reinstall the nightly from its original index."
+        )
+
     yield Finding(
         id="packages.onnxruntime_variants",
         severity=Severity.ERROR,
@@ -228,7 +255,7 @@ def onnxruntime_pileup(ctx: Context) -> Iterator[Finding]:
                 f"directory, so uninstalling just the loser would leave a broken remainder - both "
                 f"have to go before one comes back."
             ),
-            danger="Between the two commands, onnxruntime will not exist. Let it finish.",
+            danger=danger,
         ),
     )
 
@@ -373,18 +400,44 @@ def shadowed_installs(ctx: Context) -> Iterator[Finding]:
                 f"to do nothing."
             ),
             evidence={"copies": [c.to_dict() for c in copies]},
-            remedy=remedy.Remedy(
-                title=f"Remove the shadowed copies of {name}",
-                commands=[ctx.env.pip_argv("uninstall", "-y", name)] * min(len(copies), 3),
-                explain=(
-                    f"pip uninstall only removes one copy per run, so this runs it once per copy "
-                    f"({len(copies)} found), then you should reinstall {name} once. "
-                    f"Run the scan again afterwards to confirm only one is left."
-                ),
-                danger=f"This removes ALL copies of {name}. You will need to reinstall it afterwards.",
-            ),
+            remedy=_shadowed_remedy(ctx, name, copies, winner),
             # Locations are the interesting part; keep the raw list for the report.
         )
+
+
+def _shadowed_remedy(ctx: Context, name: str, copies, winner) -> remedy.Remedy:
+    """Uninstall every copy, then PUT THE WINNER BACK in the same click.
+
+    The old advice ran only the uninstalls and told the user to reinstall
+    afterwards — anyone who stopped there was left without the package at all.
+    A fix must leave the machine working, not half-repaired.
+    """
+    cmds = [ctx.env.pip_argv("uninstall", "-y", name)] * min(len(copies), 3)
+
+    # torch/vision/audio must NEVER be reinstalled from bare PyPI (CPU wheel).
+    # Pin the winning version and point at the correct PyTorch index instead.
+    if name in TORCH_FAMILY:
+        tag = remedy.preferred_cuda_tag(ctx.env, ctx.gpu)
+        cmds.append(ctx.env.pip_argv(
+            "install", f"{name}=={winner.base_version}",
+            "--index-url", remedy.TORCH_INDEX.format(tag=tag),
+        ))
+    else:
+        cmds.append(ctx.env.pip_argv("install", f"{name}=={winner.base_version}"))
+
+    return remedy.Remedy(
+        title=f"Collapse {name} down to one copy ({winner.base_version})",
+        commands=cmds,
+        explain=(
+            f"pip uninstall only removes one copy per run, so this runs it once per copy "
+            f"({len(copies)} found), then reinstalls {name} {winner.base_version} — the version "
+            f"that was winning the import — exactly once. Run the scan again afterwards to "
+            f"confirm only one is left."
+        ),
+        danger=(
+            f"Between the uninstalls and the reinstall, {name} will not exist. Let it finish."
+        ),
+    )
 
 
 @rule
@@ -410,6 +463,39 @@ def contested_module_names(ctx: Context) -> Iterator[Finding]:
         if set(owners) & known:
             continue  # already reported with a better, specific remedy
 
+        # On a machine where everything currently loads, a shared module is a
+        # LATENT hazard, not a failure — and the destructive act here IS
+        # uninstalling. So the advice must never be "uninstall and pick one"
+        # for packages we admit we don't understand. Do-nothing is the correct
+        # default; the non-destructive repair (force-reinstall the one you want
+        # to win) is reserved for the day something actually breaks.
+        versions = {ctx.inv.version(o) for o in owners}
+
+        if len(versions) == 1:
+            # Same version on both sides: one is almost certainly a
+            # re-published wheel of the other (filterpy 1.4.5 vs filterpywhl
+            # 1.4.5 — common when an abandoned project never shipped a wheel).
+            # The files on disk are the same code either way. Nothing to fix.
+            yield Finding(
+                id=f"packages.contested_module.{module}",
+                severity=Severity.INFO,
+                category=CAT,
+                title=f"`import {module}` is provided by {len(owners)} packages at the same version",
+                detail=(
+                    "Provided by: "
+                    + ", ".join(f"{o} {ctx.inv.version(o)}" for o in owners)
+                    + ".\nSame version on both sides usually means one is simply a re-published "
+                      "wheel of the other, so the files on disk are the same code either way."
+                ),
+                impact=(
+                    "Almost certainly harmless — leave it exactly as it is. The only way this "
+                    f"goes wrong is uninstalling one of them, which deletes files from the shared "
+                    f"`{module}` folder and breaks the other."
+                ),
+                evidence={"module": module, "owners": {o: ctx.inv.version(o) for o in owners}},
+            )
+            continue
+
         yield Finding(
             id=f"packages.contested_module.{module}",
             severity=Severity.WARNING,
@@ -419,23 +505,28 @@ def contested_module_names(ctx: Context) -> Iterator[Finding]:
                 "Provided by: "
                 + ", ".join(f"{o} {ctx.inv.version(o)}" for o in owners)
                 + ".\nThey write into the same folder, so the files on disk are a mixture of "
-                  "whichever was installed last."
+                  "whichever was installed last. (Some packages do this deliberately — "
+                  "urllib3-future, for example, is designed to shadow urllib3.)"
             ),
             impact=(
-                f"`import {module}` gives you an unpredictable blend of these packages. Uninstalling "
-                f"any one of them will delete files the others still need."
+                f"Right now nothing is observably broken — your nodes are loading with the "
+                f"current blend. The one action guaranteed to make this worse is uninstalling "
+                f"either package: they share the `{module}` folder, so removing one deletes "
+                f"files the other still needs."
             ),
             evidence={"module": module, "owners": {o: ctx.inv.version(o) for o in owners}},
             remedy=remedy.manual(
-                title="Decide which one you actually need",
+                title="Leave it alone unless something actually breaks",
                 explain=(
-                    f"ComfyDoctor won't guess this one for you - these packages aren't in our known "
-                    f"list, so we can't be sure which is the right one to keep. Work out which of "
-                    f"{', '.join(owners)} your nodes actually need, then:\n\n"
-                    f"  1. uninstall ALL of them\n"
-                    f"  2. install only the one you need\n\n"
-                    f"Uninstalling only the unwanted one will break the one you keep, because they "
-                    f"share files."
+                    f"Do nothing now — this is a note, not a wound.\n\n"
+                    f"If `import {module}` ever starts failing (an ImportError or AttributeError "
+                    f"naming {module}), repair it WITHOUT uninstalling anything: decide which "
+                    f"package the failing node needs, and force-reinstall that one so its files "
+                    f"win the shared folder:\n\n"
+                    f"  pip install --force-reinstall --no-deps <one of: {', '.join(owners)}>\n\n"
+                    f"(using the exact pip command from the System section below). That rewrites "
+                    f"`{module}` as one coherent copy and deletes nothing. Never uninstall one of "
+                    f"these on its own."
                 ),
             ),
         )
