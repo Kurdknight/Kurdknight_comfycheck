@@ -102,6 +102,51 @@ class TestLiveFetch:
         assert source == "stale-cache"
         assert (2, 14) in minors     # data a live run once saw, kept
 
+    def test_yanked_releases_do_not_count_as_shipped(self, tmp_path, monkeypatch):
+        # A fully-yanked release is not installable — demanding it would send
+        # the user to a pip resolution failure. Partially yanked still counts.
+        _isolate(tmp_path, offline=False, monkeypatch=monkeypatch)
+        releases = {
+            "2.13.0": [{"yanked": False}],
+            "2.14.0": [{"yanked": True}],                    # fully yanked
+            "2.15.0": [{"yanked": True}, {"yanked": False}],  # partially yanked
+            "2.16.0": [{}],                                   # no yanked key at all
+        }
+        with patch.object(shipped.urllib.request, "urlopen",
+                          return_value=self._fake_pypi(releases)):
+            minors, source = shipped.shipped_minors("torch")
+        assert source == "live"
+        assert (2, 13) in minors
+        assert (2, 14) not in minors
+        assert (2, 15) in minors
+        assert (2, 16) in minors
+
+
+class TestCacheHardening:
+    """A cache file that is valid JSON but the wrong shape must read as a cache
+    miss — never as a crash that disables the pairing check for 24 hours."""
+
+    def test_entry_missing_minors_falls_through_to_baked(self, tmp_path, monkeypatch):
+        _isolate(tmp_path, offline=True, monkeypatch=monkeypatch)
+        (tmp_path / "cache.json").write_text(
+            json.dumps({"torch": {"fetched_at": time.time()}}))
+        minors, source = shipped.shipped_minors("torch")
+        assert source == "baked"
+        assert (2, 13) in minors
+
+    def test_non_dict_entry_falls_through_to_baked(self, tmp_path, monkeypatch):
+        _isolate(tmp_path, offline=True, monkeypatch=monkeypatch)
+        (tmp_path / "cache.json").write_text(json.dumps({"torch": [2, 13]}))
+        minors, source = shipped.shipped_minors("torch")
+        assert source == "baked"
+
+    def test_garbage_minors_fall_through_to_baked(self, tmp_path, monkeypatch):
+        _isolate(tmp_path, offline=True, monkeypatch=monkeypatch)
+        (tmp_path / "cache.json").write_text(
+            json.dumps({"torch": {"fetched_at": time.time(), "minors": "2.13"}}))
+        minors, source = shipped.shipped_minors("torch")
+        assert source == "baked"
+
 
 class TestSafetyDirection:
     def test_staleness_can_only_underclaim(self, tmp_path, monkeypatch):

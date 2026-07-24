@@ -110,6 +110,17 @@ def reinstall_torch_stack(
         # newest one — never pin to a version we can't confirm exists.
         pkgs.append(f"torchaudio=={ta}.*" if ta else "torchaudio")
         pin_note = f"pinned to your current torch {v}, so nothing else in your environment shifts"
+    elif v and not is_prerelease_torch(v):
+        # torch itself is a real shipped release, but PyPI can't confirm its
+        # torchvision partner (release-day gap, stale offline snapshot, or a
+        # future major we don't model). Pin torch — the version on this machine
+        # is real — and let the index resolve the partners against it. Never
+        # silently upgrade the whole stack because our data source blinked.
+        pkgs = [f"torch=={v}", "torchvision", "torchaudio"]
+        pin_note = (
+            f"torch pinned to your current {v}; torchvision/torchaudio resolved "
+            f"to match it by the index"
+        )
     else:
         pkgs = ["torch", "torchvision", "torchaudio"]
         pin_note = "latest matched set"

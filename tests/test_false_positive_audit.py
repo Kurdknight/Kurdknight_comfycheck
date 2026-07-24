@@ -105,6 +105,46 @@ class TestTorchFamilyGuard:
         assert {"torch", "torchvision", "torchaudio"} <= TORCH_FAMILY
 
 
+class TestTritonRealityCheck:
+    """The 'no Windows wheels' claim is checked against the files on disk, not
+    just asserted. If the installed triton ships .pyd binaries, upstream has
+    started publishing Windows wheels and the warning must stay silent."""
+
+    def _ctx(self):
+        from comfydoctor.custom_nodes import NodeSurvey
+        from comfydoctor.env import Environment
+        from comfydoctor.gpu import GPUInfo
+        from comfydoctor.inventory import Dist, Inventory
+        from comfydoctor.rules import Context
+
+        env = Environment.__new__(Environment)
+        env.is_windows = True
+        env.python_exe = "C:/x/python.exe"
+        env.kind = "venv"
+        triton = Dist(name="triton", raw_name="triton", version="3.1.0",
+                      location="/site", modules=["triton"], owned_modules=["triton"])
+        inv = Inventory(dists={"triton": triton}, duplicates={},
+                        module_owners={}, unsatisfied=[])
+        return Context(env=env, gpu=GPUInfo(), inv=inv, nodes=NodeSurvey())
+
+    def test_real_windows_build_is_believed(self):
+        from unittest.mock import patch
+
+        from comfydoctor.rules import attention
+
+        with patch.object(attention, "_ships_windows_binaries", return_value=True):
+            assert list(attention.triton_on_windows(self._ctx())) == []
+
+    def test_linux_wheel_on_windows_still_warns(self):
+        from unittest.mock import patch
+
+        from comfydoctor.rules import attention
+
+        with patch.object(attention, "_ships_windows_binaries", return_value=False):
+            findings = list(attention.triton_on_windows(self._ctx()))
+        assert [f.id for f in findings] == ["attention.triton_linux_wheel_on_windows"]
+
+
 class TestPythonSweetSpot:
     def test_313_is_supported(self):
         from comfydoctor.rules.system import PY_SWEET_SPOT
