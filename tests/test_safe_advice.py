@@ -183,6 +183,96 @@ class TestVersionMoveRespectsBystanders:
         assert "moviepy" in d
 
 
+class TestNoOpinionAsFact:
+    """Phrases that once presented opinion or invented numbers as fact must
+    never reappear anywhere in the package. This is the systemic guard: every
+    user-visible sentence lives in these source files, so a static scan covers
+    advice for hardware and situations no single test machine can reproduce."""
+
+    BANNED = [
+        "is enough for almost everyone",     # SDPA opinion (false for video workloads)
+        "enough for most people",
+        "lose almost nothing",               # uninstall-a-2x-speedup framing
+        "uninstall ALL of them",             # destructive advice for unknown pairs
+        "20-50x slower",                     # invented precision
+        "becomes 30x slower",
+        "typically 20-30%",                  # undersold SageAttention
+        "autotuning for a few percent",      # the confused cuDNN/--cuda-malloc tip
+    ]
+
+    def test_banned_phrases_absent_from_all_sources(self):
+        root = Path(__file__).resolve().parent.parent / "comfydoctor"
+        offenders = []
+        for py in root.rglob("*.py"):
+            text = py.read_text(encoding="utf-8", errors="replace")
+            for phrase in self.BANNED:
+                if phrase in text:
+                    offenders.append(f"{py.name}: {phrase!r}")
+        js = root.parent / "web" / "comfydoctor.js"
+        if js.is_file():
+            text = js.read_text(encoding="utf-8", errors="replace")
+            for phrase in self.BANNED:
+                if phrase in text:
+                    offenders.append(f"comfydoctor.js: {phrase!r}")
+        assert not offenders, "opinion-as-fact phrasing crept back in:\n" + "\n".join(offenders)
+
+
+class TestSageEnablementIsChecked:
+    """Installing SageAttention does nothing without --use-sage-attention.
+    Whether the flag is set is verifiable from inside ComfyUI (sys.argv), and
+    the tip must fire exactly on installed-but-off."""
+
+    def _ctx(self, sage=True, runtime=True):
+        import comfydoctor.rules.opportunities as opp  # noqa: F401 - registers rules
+
+        dists = [_dist("torch", "2.9.1+cu130")]
+        if sage:
+            dists.append(_dist("sageattention", "2.2.0"))
+        gpu = _gpu_nvidia()
+        gpu.torch_ok = True
+        gpu.cuda_available = True
+        gpu.torch_devices = [{"name": "RTX 4090", "compute_capability": "8.9",
+                              "vram_total_mb": 24564}]
+        ctx = _ctx_base = _ctx_build(dists, gpu)
+        ctx.nodes.runtime_known = runtime
+        return ctx
+
+    def test_installed_but_flag_missing_fires(self):
+        import sys
+        from unittest.mock import patch
+
+        from comfydoctor.rules import opportunities
+
+        with patch.object(sys, "argv", ["main.py", "--listen"]):
+            found = list(opportunities.sage_installed_but_off(self._ctx()))
+        assert [f.id for f in found] == ["tip.sageattention_not_enabled"]
+        assert found[0].remedy.commands == []   # advice only, nothing destructive
+
+    def test_flag_present_stays_silent(self):
+        import sys
+        from unittest.mock import patch
+
+        from comfydoctor.rules import opportunities
+
+        with patch.object(sys, "argv", ["main.py", "--use-sage-attention"]):
+            assert list(opportunities.sage_installed_but_off(self._ctx())) == []
+
+    def test_cli_mode_stays_silent_rather_than_guess(self):
+        import sys
+        from unittest.mock import patch
+
+        from comfydoctor.rules import opportunities
+
+        with patch.object(sys, "argv", ["doctor.py"]):
+            assert list(opportunities.sage_installed_but_off(self._ctx(runtime=False))) == []
+
+
+def _ctx_build(dists, gpu):
+    inv = Inventory(dists={d.name: d for d in dists}, duplicates={},
+                    module_owners={}, unsatisfied=[])
+    return Context(env=_env(), gpu=gpu, inv=inv, nodes=NodeSurvey())
+
+
 class TestShadowedInstallFixIsComplete:
     def test_fix_puts_the_package_back(self):
         # The old fix ran only the uninstalls and left the user without the

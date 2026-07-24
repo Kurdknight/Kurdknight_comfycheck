@@ -25,7 +25,6 @@ from __future__ import annotations
 from typing import Iterator
 
 from .. import remedy
-from ..facts import _cudnn
 from ..models import Finding, Remedy, Severity
 from . import Context, rule
 
@@ -62,30 +61,78 @@ def sage_attention(ctx: Context) -> Iterator[Finding]:
         id="tip.sageattention",
         severity=Severity.TIP,
         category=CAT,
-        title="SageAttention could speed up your sampling by roughly 20-30%",
+        title="SageAttention could make sampling noticeably faster - users report up to ~2x on video models",
         detail=(
-            f"{name} (compute {cc}) supports SageAttention's INT8 kernels, and it isn't installed."
+            f"{name} (compute {cc}) supports SageAttention's quantised kernels, and it isn't installed."
         ),
         impact=(
-            "SageAttention replaces the attention maths with quantised kernels. On Ampere and "
-            "newer cards it typically cuts 20-30% off sampling time, and more on video models "
-            "where attention dominates. Quality loss is generally imperceptible.\n\n"
+            "SageAttention replaces the attention maths with faster quantised kernels. Reported "
+            "gains vary by workload: commonly 20-40% faster sampling on image models, and "
+            "1.5-2x on video models (Wan, Hunyuan), where attention dominates the time. Quality "
+            "loss is generally imperceptible.\n\n"
             "It needs Triton to compile its kernels, so install that too if you don't have it. "
-            "You then launch ComfyUI with --use-sage-attention."
+            "IMPORTANT: installing it changes nothing by itself - you must also launch ComfyUI "
+            "with --use-sage-attention."
         ),
         evidence={"compute_capability": cc, "gpu": name},
         remedy=Remedy(
             title="Install SageAttention",
             commands=[ctx.env.pip_argv("install", "sageattention")],
             explain=(
-                "Installs SageAttention, then launch ComfyUI with --use-sage-attention to turn it "
-                "on.\n\n"
+                "Installs SageAttention, then add --use-sage-attention to your ComfyUI launch "
+                "command to turn it on.\n\n"
                 "It is a compiled package built against a specific torch — if a future torch "
                 "upgrade breaks it, ComfyDoctor will tell you, and uninstalling it is always a "
                 "safe fallback (you lose speed, nothing else)."
             ),
             danger=None,
             doc_url="https://github.com/thu-ml/SageAttention",
+        ),
+    )
+
+
+@rule
+def sage_installed_but_off(ctx: Context) -> Iterator[Finding]:
+    """The saddest configuration: the speed-up installed, sitting idle.
+
+    We run inside ComfyUI's process, so sys.argv IS the launch command — whether
+    the flag is set is a verifiable fact about this session, not a guess."""
+    import sys
+
+    if not _gpu_healthy(ctx):
+        return
+    if not ctx.inv.has("sageattention"):
+        return
+    if not ctx.comfy_runtime:
+        return  # from the CLI we can't see the launch flags - say nothing rather than guess
+    if "--use-sage-attention" in sys.argv:
+        return
+
+    yield Finding(
+        id="tip.sageattention_not_enabled",
+        severity=Severity.TIP,
+        category=CAT,
+        title="SageAttention is installed but not switched on",
+        detail=(
+            f"sageattention {ctx.inv.version('sageattention')} is installed, but ComfyUI was not "
+            f"started with --use-sage-attention."
+        ),
+        impact=(
+            "Installing SageAttention changes nothing by itself. Unless a workflow node (for "
+            "example KJNodes' 'Patch Sage Attention') switches it on for a specific run, your "
+            "sampling is still using the slower built-in path and the speed-up you installed is "
+            "sitting idle. Users commonly report 1.3-2x faster sampling with it on, most on "
+            "video models."
+        ),
+        evidence={"launch_flags": [a for a in sys.argv if a.startswith("--")]},
+        remedy=remedy.manual(
+            title="Add --use-sage-attention to your launch command",
+            explain=(
+                "Open the .bat (or .sh) file you start ComfyUI with and add "
+                "--use-sage-attention to the line that runs main.py, then restart ComfyUI.\n\n"
+                "If sampling afterwards errors mentioning sageattention or triton, just remove "
+                "the flag again - nothing else is affected."
+            ),
         ),
     )
 
@@ -253,33 +300,9 @@ def bf16_capable(ctx: Context) -> Iterator[Finding]:
     )
 
 
-@rule
-def cudnn_benchmark(ctx: Context) -> Iterator[Finding]:
-    if not _gpu_healthy(ctx):
-        return
-    if ctx.gpu.backends.get("cudnn_version") is None:
-        return
-    # ComfyUI does not enable this by default, and for the fixed-resolution
-    # batches typical of image generation it is close to free speed.
-    yield Finding(
-        id="tip.cudnn_benchmark",
-        severity=Severity.TIP,
-        category=CAT,
-        title="Try --cuda-malloc and cuDNN autotuning for a few percent more throughput",
-        detail=f"cuDNN {_cudnn(ctx.gpu.backends['cudnn_version'])} is available.",
-        impact=(
-            "cuDNN can benchmark convolution algorithms on first use and then reuse the fastest "
-            "one. It costs a few seconds on the first run of each new resolution and gives a small "
-            "but free speed-up on every run after — which suits image generation, where you tend "
-            "to hammer the same resolution repeatedly.\n\n"
-            "This is a modest win (a few percent), not a transformative one. Mentioned for "
-            "completeness; ignore it if you switch resolutions constantly."
-        ),
-        remedy=remedy.manual(
-            title="Add to your launch arguments",
-            explain=(
-                "Add `--cuda-malloc` to your ComfyUI launch command. Most builds enable cuDNN "
-                "benchmarking automatically once a workload settles; there is nothing to install."
-            ),
-        ),
-    )
+# NOTE: there used to be a "--cuda-malloc / cuDNN autotuning" tip here. It was
+# removed deliberately: it conflated two unrelated mechanisms, promised "a few
+# percent" nobody had measured, and claimed builds enable benchmarking
+# automatically - an assertion we cannot verify. A tip that confuses people to
+# maybe save 2% fails this file's own second rule. Do not resurrect it without
+# a verifiable claim and a verifiable action.

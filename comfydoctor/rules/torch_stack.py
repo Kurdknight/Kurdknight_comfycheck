@@ -62,8 +62,9 @@ def cpu_torch_on_gpu_machine(ctx: Context) -> Iterator[Finding]:
             f"compiled in at all."
         )
         impact = (
-            "Every render is running on your CPU. Expect roughly 20-50x slower generation, "
-            "with no error message anywhere - this is almost certainly why things feel broken. "
+            "Every render is running on your CPU. Renders will be many times slower - often "
+            "20x or more - with no error message anywhere; this is almost certainly why things "
+            "feel broken. "
             "The usual cause is a custom node's requirements.txt installing plain `torch` from "
             "PyPI, which is the CPU wheel, on top of your CUDA build."
         )
