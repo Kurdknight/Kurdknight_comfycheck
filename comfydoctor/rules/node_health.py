@@ -219,7 +219,7 @@ def nodes_that_can_break_torch(ctx: Context) -> Iterator[Finding]:
             "If you ever run `pip install -r requirements.txt` for these nodes - which is exactly "
             "what ComfyUI-Manager's 'Try fix' button does - pip will resolve `torch` against PyPI, "
             "whose default wheel is CPU-only, and quietly overwrite your CUDA build. Everything "
-            "keeps working; it just becomes 30x slower, with nothing in any log to explain it.\n\n"
+            "keeps working; it just becomes drastically slower, with nothing in any log to explain it.\n\n"
             "Nothing is broken right now. This is a landmine, not a wound."
         ),
         evidence={"nodes": risky},

@@ -14,6 +14,7 @@ imports, no crashes.
 from __future__ import annotations
 
 import re
+import sys
 from typing import Iterator
 
 from .. import remedy
@@ -87,10 +88,12 @@ def abi_pin_mismatch(ctx: Context) -> Iterator[Finding]:
                 remedy=remedy.uninstall(
                     ctx.env, [pkg],
                     why=(
-                        f"Removing {pkg} is the safe, fast fix: PyTorch's built-in SDPA attention "
-                        f"is close to xFormers speed on modern GPUs, so most users lose almost "
-                        f"nothing.\n\n"
-                        f"If you specifically need {pkg}, install a build made for torch "
+                        f"Removing {pkg} is the safe fix: nothing breaks, ComfyUI falls back to "
+                        f"PyTorch's built-in attention automatically. You do lose {pkg}'s "
+                        f"speed-up until you reinstall a matching build - for SageAttention on "
+                        f"video workloads that can be a noticeable slowdown; for xFormers on "
+                        f"modern cards the difference is usually small.\n\n"
+                        f"If you want to keep {pkg}, install a build made for torch "
                         f"{torch_d.base_version} instead - check the project's release notes for "
                         f"which version pairs with your torch."
                     ),
@@ -228,33 +231,67 @@ def triton_on_windows(ctx: Context) -> Iterator[Finding]:
     )
 
 
+# Launch flags that decide which attention path ComfyUI uses. Reading them from
+# sys.argv (we run inside ComfyUI's process) is a FACT about this session —
+# unlike guessing what ComfyUI "probably" picked.
+_ATTENTION_FLAGS = (
+    "--use-sage-attention", "--use-flash-attention", "--use-pytorch-cross-attention",
+    "--use-split-cross-attention", "--use-quad-cross-attention", "--disable-xformers",
+)
+
+
 @rule
 def attention_summary(ctx: Context) -> Iterator[Finding]:
-    """What attention can this machine actually do? Informational, but it's the
-    question people are really asking when they run a checker at all."""
+    """Which attention speed-ups exist on this machine, and — the part everyone
+    misses — whether ComfyUI is actually set to use them. Installing one changes
+    nothing by itself. We report what we can verify (installed packages, launch
+    flags) and label reported speed-ups as exactly that: reported, and
+    workload-dependent."""
     if not ctx.gpu.torch_ok:
         return
 
-    have = []
-    if ctx.gpu.backends.get("flash_sdp"):
-        have.append("PyTorch SDPA (flash)")
-    if ctx.gpu.backends.get("mem_efficient_sdp"):
-        have.append("PyTorch SDPA (mem-efficient)")
-    for pkg, label in (("xformers", "xFormers"), ("flash-attn", "FlashAttention"),
-                       ("sageattention", "SageAttention")):
+    installed = []
+    for pkg, label in (("sageattention", "SageAttention"), ("flash-attn", "FlashAttention"),
+                       ("xformers", "xFormers")):
         d = ctx.inv.get(pkg)
         if d:
-            have.append(f"{label} {d.version}")
+            installed.append(f"{label} {d.version}")
+
+    lines = []
+    if installed:
+        lines.append("Installed speed-ups: " + ", ".join(installed) + ".")
+    lines.append(
+        "Always available: PyTorch's built-in attention. It is the fallback whenever no "
+        "speed-up is switched on."
+    )
+    if ctx.comfy_runtime:
+        flags = [a for a in sys.argv if a in _ATTENTION_FLAGS]
+        if flags:
+            lines.append("Launch flags in effect: " + " ".join(flags) + ".")
+        elif installed:
+            lines.append(
+                "Launch flags: none of the attention flags are set - ComfyUI is picking the "
+                "attention path by its own defaults, and installed speed-ups that need a flag "
+                "(like SageAttention) are NOT being used globally."
+            )
 
     yield Finding(
         id="attention.available",
         severity=Severity.INFO,
         category=CAT,
-        title="Attention backends available: " + (", ".join(have) if have else "none"),
-        detail=(
-            "PyTorch's built-in SDPA is enough for almost everyone on a modern GPU. xFormers and "
-            "FlashAttention are optional speed-ups, and both are common sources of the version "
-            "conflicts above - if you're not sure you need them, you probably don't."
+        title=(
+            "Attention speed-ups installed: " + ", ".join(i.split(" ")[0] for i in installed)
+            if installed else
+            "No attention speed-up packages installed (using PyTorch's built-in)"
         ),
-        evidence={"backends": ctx.gpu.backends, "packages": have},
+        detail="\n".join(lines),
+        impact=(
+            "Attention is the part of the maths that takes most of your render time; these "
+            "packages replace it with faster versions. What users commonly report (it varies by "
+            "workload and card): SageAttention about 1.3-2x faster sampling, largest on video "
+            "models like Wan or Hunyuan; FlashAttention and xFormers smaller gains over the "
+            "built-in on modern cards. Installing one does nothing by itself - it must be "
+            "switched on at launch (for example --use-sage-attention) or by a workflow node."
+        ),
+        evidence={"backends": ctx.gpu.backends, "packages": installed},
     )

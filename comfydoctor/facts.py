@@ -33,9 +33,9 @@ LIBRARY_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
         ("torchaudio", "audio ops; must match torch's release"),
     ]),
     ("Attention & speed", [
-        ("xformers", "memory-efficient attention (optional; SDPA is usually enough)"),
+        ("xformers", "memory-efficient attention (alternative to the built-in)"),
         ("flash-attn", "FlashAttention kernels"),
-        ("sageattention", "INT8 attention — typically 20-30% faster sampling"),
+        ("sageattention", "quantised attention — reported 1.3-2x faster sampling, biggest on video; needs --use-sage-attention"),
         ("triton", "compiles GPU kernels; needed by torch.compile"),
         ("triton-windows", "the Windows port of Triton"),
         ("deepspeed", "large-model training/inference optimisation"),
@@ -73,7 +73,7 @@ LIBRARY_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
     ("Face & detection", [
         ("insightface", "face analysis — powers ReActor, IPAdapter FaceID"),
         ("onnxruntime", "ONNX inference (CPU build)"),
-        ("onnxruntime-gpu", "ONNX inference (GPU build) — 5-10x faster for face nodes"),
+        ("onnxruntime-gpu", "ONNX inference (GPU build) — much faster for face nodes"),
         ("facexlib", "face restoration helpers"),
         ("dlib", "classical face landmarks"),
         ("mediapipe", "Google's face/pose detection"),
@@ -245,7 +245,7 @@ def _pytorch(gpu: GPUInfo) -> list[dict]:
         ("math_sdp", "Math (fallback)"),
     ) if b.get(key)]
     rows.append(_row("SDPA backends", ", ".join(sdpa) or "none",
-                     note="PyTorch's built-in attention — enough for most people without xFormers"))
+                     note="PyTorch's built-in attention — the path used when no speed-up is switched on"))
     for key, label in (("mkl", "Intel MKL"), ("openmp", "OpenMP")):
         if key in b:
             rows.append(_row(label, "enabled" if b[key] else "disabled"))
