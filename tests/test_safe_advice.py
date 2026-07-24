@@ -140,6 +140,49 @@ class TestOnnxruntimePrereleaseKeeper:
         assert "PRE-RELEASE" not in found[0].remedy.danger
 
 
+class TestVersionMoveRespectsBystanders:
+    """The pillow/moviepy case: a fix that moves a shared library must carry
+    EVERY installed package's declared pin on it, so pip refuses outright
+    rather than satisfying one package by breaking another. And on a working
+    machine the danger text must say that doing nothing is a valid choice."""
+
+    def _pillow_ctx(self):
+        dists = [
+            _dist("pillow", "12.1.0"),
+            _dist("moviepy", "2.2.1"),
+            _dist("qrcode", "8.0"),
+        ]
+        # qrcode's pin is satisfied today - it must STILL end up in the command.
+        dists[2].requires = ["pillow>=9.0"]
+        inv = Inventory(
+            dists={d.name: d for d in dists},
+            duplicates={}, module_owners={},
+            unsatisfied=[{
+                "dist": "moviepy", "requirement": "pillow<12.0,>=9.2.0",
+                "target": "pillow", "specifier": "<12.0,>=9.2.0",
+                "installed": "12.1.0",
+                "reason": "pillow 12.1.0 is installed, but moviepy requires <12.0,>=9.2.0",
+            }],
+        )
+        return Context(env=_env(), gpu=GPUInfo(), inv=inv, nodes=NodeSurvey())
+
+    def test_bystander_pins_join_the_install_spec(self):
+        found = [f for f in pkg_rules.broken_dependencies(self._pillow_ctx())
+                 if f.id == "packages.unsatisfied.pillow"]
+        assert len(found) == 1
+        arg = found[0].remedy.commands[0][-1]
+        assert arg.startswith("pillow")
+        assert "<12.0" in arg          # the complainer's ceiling
+        assert ">=9.0" in arg          # the satisfied bystander's floor, kept
+
+    def test_danger_says_doing_nothing_is_valid(self):
+        found = [f for f in pkg_rules.broken_dependencies(self._pillow_ctx())
+                 if f.id == "packages.unsatisfied.pillow"]
+        d = found[0].remedy.danger or ""
+        assert "doing nothing" in d.lower()
+        assert "moviepy" in d
+
+
 class TestShadowedInstallFixIsComplete:
     def test_fix_puts_the_package_back(self):
         # The old fix ran only the uninstalls and left the user without the
