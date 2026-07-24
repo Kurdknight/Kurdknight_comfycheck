@@ -237,8 +237,11 @@ def onnxruntime_pileup(ctx: Context) -> Iterator[Finding]:
 def numpy_abi_break(ctx: Context) -> Iterator[Finding]:
     """numpy 2.x vs packages compiled against numpy 1.x.
 
-    Computed from real metadata, not from a hand-maintained blocklist: we look
-    for anything that actually pins numpy<2 and check it against what's on disk.
+    Computed from real metadata, not from a hand-maintained blocklist — and the
+    specifiers are EVALUATED, never string-matched. The old `"<2" in spec` test
+    read `numpy>=1.24,<2.3` (a normal, *satisfied* numpy-2 pin) as "needs numpy
+    1.x" and pushed a downgrade remedy on healthy machines: the torchaudio
+    formula disease in a different coat.
     """
     np = ctx.inv.get("numpy")
     if not np:
@@ -247,17 +250,22 @@ def numpy_abi_break(ctx: Context) -> Iterator[Finding]:
     if not v or v.major < 2:
         return
 
-    from ..inventory import requirement_pins
+    from ..inventory import requirement_pins, satisfies
 
-    blocked: list[tuple[str, str]] = []       # want numpy 1.x
-    need_np2: list[tuple[str, str]] = []      # want numpy >= 2
+    # 1.26.4 is the final numpy 1.x ever released — a fixed historical fact, so
+    # baking it cannot rot. It stands in for "does this spec accept ANY numpy 1?".
+    LAST_NUMPY1 = "1.26.4"
+
+    blocked: list[tuple[str, str]] = []       # rejects installed numpy, accepts 1.x
+    need_np2: list[tuple[str, str]] = []      # rejects every numpy 1.x
     for name, dist in ctx.inv.dists.items():
         for spec in requirement_pins(dist, "numpy"):
-            flat = spec.replace(" ", "")
-            if "<2" in flat:
+            ok_installed = satisfies(np.version, spec)
+            ok_np1 = satisfies(LAST_NUMPY1, spec)
+            if ok_installed is False and ok_np1 is not False:
                 blocked.append((name, spec))
                 break
-            if ">=2" in flat or ">2" in flat:
+            if ok_np1 is False:
                 need_np2.append((name, spec))
                 break
 

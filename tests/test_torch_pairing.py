@@ -102,3 +102,42 @@ class TestReinstallRemedy:
             return
         assert "==2.99" not in flat
         assert "torchvision==" not in flat
+
+
+class TestReleaseGapStillPinsTorch:
+    """torch has shipped but its torchvision partner isn't visible yet
+    (release-day gap, or a stale offline snapshot). The remedy must still
+    REPAIR — pin the user's real torch — never silently upgrade the stack."""
+
+    def test_shipped_torch_with_unknown_partner_pins_torch_only(self, tmp_path, monkeypatch):
+        import json
+        import time
+
+        from comfydoctor import shipped
+
+        monkeypatch.setattr(shipped, "CACHE_FILE", str(tmp_path / "cache.json"))
+        now = time.time()
+        cache = {
+            "torch": {"fetched_at": now, "minors": [[2, 13], [2, 14]]},
+            "torchvision": {"fetched_at": now, "minors": [[0, 28]]},   # 0.29 missing
+            "torchaudio": {"fetched_at": now, "minors": [[2, 11]]},
+        }
+        (tmp_path / "cache.json").write_text(json.dumps(cache))
+        shipped.clear_caches()
+        try:
+            from comfydoctor.env import Environment
+            from comfydoctor.gpu import GPUInfo
+            from comfydoctor.remedy import reinstall_torch_stack
+
+            env = Environment.__new__(Environment)
+            env.is_windows = False
+            env.python_exe = "/usr/bin/python3"
+            env.kind = "venv"
+            r = reinstall_torch_stack(env, GPUInfo(), torch_version="2.14.0")
+            args = [a for c in r.commands for a in c]
+            assert "torch==2.14.0" in args, "the user's real torch must stay pinned"
+            assert "torchvision" in args
+            assert not any(a.startswith("torchvision==") for a in args)
+            assert not any(a.startswith("torchaudio==") for a in args)
+        finally:
+            shipped.clear_caches()
