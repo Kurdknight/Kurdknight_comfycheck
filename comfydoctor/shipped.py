@@ -88,12 +88,25 @@ def _fetch_pypi_minors(pkg: str) -> frozenset[tuple[int, int]] | None:
             data = json.load(resp)
         out = set()
         for ver, files in data.get("releases", {}).items():
-            if not files:
-                continue  # version registered but nothing ever uploaded
+            # Skip versions with nothing actually installable: never uploaded,
+            # or every file yanked. A yanked release must never make us demand
+            # it — pip won't resolve it and the user can't install it.
+            if not any(not f.get("yanked", False) for f in files):
+                continue
             m = _FINAL_RELEASE.fullmatch(ver)
             if m:
                 out.add((int(m.group(1)), int(m.group(2))))
         return frozenset(out) if out else None
+    except Exception:
+        return None
+
+
+def _entry_minors(entry) -> frozenset[tuple[int, int]] | None:
+    """The minors stored in a cache entry, or None when the entry is malformed.
+    A truncated or foreign write must read as a cache miss, never as a crash
+    that silently disables the pairing check for the next 24 hours."""
+    try:
+        return frozenset((int(a), int(b)) for a, b in entry["minors"]) or None
     except Exception:
         return None
 
@@ -107,11 +120,12 @@ def shipped_minors(pkg: str) -> tuple[frozenset[tuple[int, int]], str]:
     cache = _load_cache()
     entry = cache.get(pkg)
     now = time.time()
+    cached = _entry_minors(entry) if isinstance(entry, dict) else None
 
     result: tuple[frozenset[tuple[int, int]], str] | None = None
 
-    if entry and now - entry.get("fetched_at", 0) < CACHE_TTL:
-        result = (frozenset(tuple(x) for x in entry["minors"]), "cache")
+    if cached and now - entry.get("fetched_at", 0) < CACHE_TTL:
+        result = (cached, "cache")
 
     if result is None and _network_allowed():
         live = _fetch_pypi_minors(pkg)
@@ -120,8 +134,8 @@ def shipped_minors(pkg: str) -> tuple[frozenset[tuple[int, int]], str]:
             _save_cache(cache)
             result = (live, "live")
 
-    if result is None and entry:  # network down: stale beats baked
-        result = (frozenset(tuple(x) for x in entry["minors"]), "stale-cache")
+    if result is None and cached:  # network down: stale beats baked
+        result = (cached, "stale-cache")
 
     if result is None:
         result = (frozenset(tuple(x) for x in BAKED.get(pkg, [])), "baked")
