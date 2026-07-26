@@ -1,16 +1,20 @@
 # ComfyDoctor
 
-**Finds what's actually broken in your ComfyUI Python environment — and fixes it.**
+**Diagnoses what is actually broken in a ComfyUI Python environment — and repairs it in one click.**
 
-Not another "system info" node. ComfyDoctor looks for the specific things that break ComfyUI
-in practice — version conflicts, a CPU-only PyTorch quietly replacing your CUDA one, custom
-nodes fighting over the same package, `cv2` being claimed by three different installs — and
-for each one it tells you *what will actually go wrong for you* and gives you a one-click fix,
-built with the correct Python for your install.
+ComfyUI runs on a single shared Python environment that dozens of independently written
+custom nodes install into. In practice that environment drifts: a CPU-only PyTorch quietly
+replaces a CUDA build, two nodes demand incompatible versions of the same package, or three
+installs fight over the same `cv2` folder. Nothing errors at startup — things simply run slowly,
+or fail deep inside a render.
 
-> **It also works when ComfyUI won't start.** That's the point. A broken torch means ComfyUI
-> never finishes booting, so a diagnostic *node* can never load — it's unavailable at exactly
-> the moment you need it. ComfyDoctor ships a standalone launcher for that case.
+ComfyDoctor scans for these specific, real-world failures. For each one it explains the concrete
+effect on your setup and, where possible, offers a one-click fix that runs against the correct
+Python interpreter for your install.
+
+> **It also works when ComfyUI won't start.** A broken PyTorch stops ComfyUI from finishing
+> boot, so a diagnostic *node* can never load — it is unavailable at exactly the moment it is
+> needed. ComfyDoctor therefore ships a standalone command-line launcher for that case.
 
 <table>
 <tr>
@@ -18,17 +22,17 @@ built with the correct Python for your install.
 <td width="50%"><img src="docs/environment.png" alt="ComfyDoctor environment inventory"></td>
 </tr>
 <tr>
-<td align="center"><b>Findings</b> — what's wrong, what it does to you, one-click fix</td>
-<td align="center"><b>Environment</b> — your whole stack, and what each library is for</td>
+<td align="center"><b>Findings</b> — what is wrong, what it means for you, and a one-click fix</td>
+<td align="center"><b>Environment</b> — your full stack, and what each library is for</td>
 </tr>
 </table>
 
-Every finding says what it is, **what it will actually do to you**, and how to fix it — with a
-button that runs the fix against the correct Python for your install. The Environment tab
-restores the old system-info view, computed correctly this time.
+Every finding states what it is, what effect it has, and how to resolve it — with a button that
+runs the fix against the correct Python for your install. The **Environment** tab provides a full
+system-and-library inventory.
 
 <details>
-<summary><b>The exported report</b> (self-contained HTML, works in light and dark, paths anonymized)</summary>
+<summary><b>Exported report</b> (self-contained HTML, works in light and dark, paths anonymized)</summary>
 
 ![HTML report](docs/report-dark.png)
 
@@ -36,30 +40,35 @@ restores the old system-info view, computed correctly this time.
 
 ---
 
-## Install
+## Installation
 
-**ComfyUI Manager** — search for **ComfyDoctor**, click Install, restart.
+**Via ComfyUI Manager** — search for **ComfyDoctor**, click Install, then restart ComfyUI.
 
 **Manually:**
 ```
 cd ComfyUI/custom_nodes
 git clone https://github.com/Kurdknight/Kurdknight_comfycheck
 ```
-Restart ComfyUI. There are no heavy dependencies — it needs only `psutil` and `packaging`,
-both of which ComfyUI already installs.
+Restart ComfyUI. There are no heavy dependencies — ComfyDoctor needs only `psutil` and
+`packaging`, both of which ComfyUI already installs.
 
-## Use it
+---
 
-### The panel
-Open the **Doctor** tab in the ComfyUI sidebar. It scans on open and shows every problem
-grouped by severity, with a **Fix this** button where a fix exists. Fixes run in the
-background and stream their pip output live into the panel.
+## Usage
 
-### When ComfyUI won't start
-This is the case the old version couldn't help with at all.
+### The sidebar panel
 
-**Windows:** double-click **`comfydoctor.bat`** in this folder. It finds ComfyUI's real Python
-by itself and prints a full diagnosis.
+Open the **Doctor** tab in the ComfyUI sidebar. It scans automatically when opened and lists
+every issue grouped by severity, with a **Fix this** button wherever an automatic fix exists.
+Fixes run in the background, and their pip output streams live into the panel.
+
+### The command line (works even when ComfyUI won't start)
+
+When a broken environment prevents ComfyUI from starting, the panel cannot load. The
+command-line launcher runs off the same engine and reports the same findings.
+
+**Windows:** double-click **`comfydoctor.bat`** in this folder. It locates ComfyUI's real Python
+interpreter automatically and prints a full diagnosis.
 
 **Any platform:**
 ```
@@ -70,92 +79,95 @@ python_embeded\python.exe -s ComfyUI\custom_nodes\Kurdknight_comfycheck\doctor.p
 python ComfyUI/custom_nodes/Kurdknight_comfycheck/doctor.py
 ```
 
+Common options:
 ```
-python doctor.py                    # diagnose
+python doctor.py                    # full diagnosis
 python doctor.py --quiet            # only the problems
+python doctor.py --env              # full environment inventory
 python doctor.py --markdown         # anonymized report, ready to paste into an issue
 python doctor.py --html report.html # a self-contained HTML report
-python doctor.py --fix <finding-id> # apply one fix
+python doctor.py --fix <finding-id> # apply one fix (id shown in brackets)
 ```
 
-Exit code is `0` when clean, `1` on warnings, `2` on errors — so you can gate a launch script
-on it.
+The exit code is `0` when clean, `1` on warnings, and `2` on errors — so a launch script can be
+gated on it.
 
-### As a node
-One node, **ComfyDoctor Report** (under `utils/ComfyDoctor`), outputs the report as a `STRING`
-plus a `0-100` health score, for anyone who wants it inside a graph.
+### The node
+
+A single node, **ComfyDoctor Report** (category `utils/ComfyDoctor`), outputs the report as a
+`STRING` alongside a `0–100` health score, for use inside a graph — for example piping the report
+into a text overlay or saving it beside a batch render. The interactive panel remains the primary
+way to view and fix issues.
 
 ---
 
-## What it actually checks
+## What it checks
 
 **PyTorch**
-- CPU-only torch installed on a machine with an NVIDIA GPU — *the silent killer*: nothing
-  errors, renders are just 20–50× slower forever. Usually caused by a custom node's
-  `requirements.txt` pulling plain `torch` from PyPI over the top of your CUDA build.
-- torch / torchvision / torchaudio from different releases (`operator torchvision::nms does
-  not exist`)
-- Build tags that disagree — a `cu124` torch next to a `cpu` torchvision
-- An NVIDIA driver too old for the CUDA build you have installed
+- CPU-only PyTorch installed on a machine with an NVIDIA GPU. Nothing errors; renders are simply
+  20–50× slower, indefinitely. Usually caused by a custom node's `requirements.txt` pulling plain
+  `torch` from PyPI over an existing CUDA build.
+- `torch` / `torchvision` / `torchaudio` from mismatched releases (which surface as errors such as
+  `operator torchvision::nms does not exist`).
+- Build tags that disagree — for example a `cu124` torch beside a `cpu` torchvision.
+- An NVIDIA driver too old for the installed CUDA build.
 
 **Attention backends**
-- xformers / flash-attn / sageattention compiled against a *different torch* than the one
-  installed — read straight from package metadata, so we catch it without importing them and
-  crashing
-- The Linux-only `triton` package installed on Windows (you need `triton-windows`)
+- xformers / flash-attn / sageattention compiled against a *different* PyTorch than the one
+  installed. This is read from package metadata, so the mismatch is caught without importing the
+  package (which would otherwise abort the process).
+- The Linux-only `triton` package installed on Windows, where `triton-windows` is required.
 
 **Package conflicts**
-- Everything `pip check` would report, but with the reason and the cure in plain English
-- `onnxruntime` **and** `onnxruntime-gpu` both installed — the usual reason InsightFace /
-  ReActor / IPAdapter FaceID silently run on CPU
-- Two or three OpenCV variants fighting over the same `cv2` folder
-- numpy 2.x installed alongside packages built for numpy 1.x (`_ARRAY_API not found`)
-- The same package installed **twice**, in two different site-packages — so `pip install
-  --upgrade` appears to work and ComfyUI keeps loading the old one
-- Any two distributions claiming the same import name
+- Everything `pip check` would report, restated with the cause and the fix in plain language.
+- `onnxruntime` and `onnxruntime-gpu` both installed — a common reason InsightFace / ReActor /
+  IPAdapter FaceID silently fall back to CPU.
+- Multiple OpenCV variants competing for the same `cv2` folder.
+- numpy 2.x installed alongside packages built for numpy 1.x (`_ARRAY_API not found`).
+- The same package installed twice in different site-packages directories, so `pip install
+  --upgrade` appears to work while ComfyUI keeps loading the old copy.
+- Any two distributions claiming the same import name.
 
-**Custom nodes** *(nobody else checks this)*
-- Which nodes **failed to import**, cross-referenced with *why* — "IPAdapter_plus failed, and
-  it needs insightface, which isn't installed"
-- Nodes that loaded fine but whose requirements aren't met — these fail *late*, mid-render
-- Nodes whose version pins **genuinely contradict each other**, where no install can satisfy
-  both and you have to choose
-- Nodes that list `torch` in their `requirements.txt` — a landmine, because installing them
-  can silently replace your CUDA PyTorch with the CPU wheel
+**Custom nodes**
+- Which nodes failed to import, cross-referenced with *why* — for example "IPAdapter_plus failed,
+  and it requires insightface, which is not installed."
+- Nodes that loaded but whose requirements are unmet, which typically fail later, mid-render.
+- Nodes whose version pins genuinely contradict one another, where no single install can satisfy
+  both and a choice has to be made.
+- Nodes that list `torch` in their `requirements.txt` — a risk, because installing them can
+  silently replace a CUDA PyTorch with the CPU wheel.
 
-**System** — Python version vs. what the ecosystem supports, free space on the drive ComfyUI
-is *actually on*, RAM, VRAM, and the exact `pip` command for your interpreter.
-
----
-
-## Design notes
-
-**It never imports a package to inspect it.** Everything comes from `importlib.metadata` — the
-`.dist-info` on disk — and from `nvidia-smi`. Importing xformers or flash-attn against a
-mismatched torch doesn't raise a tidy `ImportError`; it aborts the process. A diagnostic that
-kills the thing it's diagnosing is worthless.
-
-**Fixes are safe by construction.** The browser can never send a command. It sends a *finding
-id*, and the server runs only the argv it generated itself during the last scan. Commands are
-executed as argv lists with `shell=False` — there is no shell, no quoting, no injection
-surface. One repair runs at a time, because two concurrent pips writing the same
-site-packages is how a broken environment becomes an unrecoverable one.
-
-**Reports are anonymized.** Your Windows username and home path are stripped, so you can paste
-a report into a public GitHub issue without leaking your name.
+**System** — Python version against what the ecosystem supports, free space on the drive ComfyUI
+is actually installed on, system RAM, VRAM, and the exact `pip` command for your interpreter.
 
 ---
 
-## Upgrading from v1
+## How it works
 
-The old `SystemCheck` and `SystemViz` nodes are **aliased onto the new node**, so existing
-workflows still open.
+**Findings come from package metadata, not from importing packages.** Version and build
+information is read from the `.dist-info` records on disk (`importlib.metadata`) and from
+`nvidia-smi`. ABI-bound packages such as xformers and flash-attn are never imported, because
+importing one built against a mismatched PyTorch does not raise a clean `ImportError` — it aborts
+the process. PyTorch itself is the one package that must be probed directly; when it is not
+already loaded, that probe runs in an isolated subprocess, so a crashing CUDA/driver pairing is
+reported rather than fatal.
 
-Be aware their output was wrong. The old code called `importlib.import_module("opencv-python")`
-to read versions — which can never succeed, because the *module* is named `cv2`. Same for
-`scikit-learn`, `pillow` and `face-recognition`. It reported **"Not installed"** for packages
-that were installed, and it did it for years. If you were relying on that output, you were
-relying on a bug.
+**Fixes are safe by construction.** The browser never sends a command. It sends a *finding id*,
+and the server runs only the argument list it generated itself during the last scan. Commands are
+executed as argv lists with `shell=False` — no shell, no quoting, no injection surface. Only one
+repair runs at a time, because two concurrent pip processes writing the same site-packages is how
+a recoverable environment becomes an unrecoverable one.
+
+**Reports are anonymized.** Your username and home path are stripped from exported reports, so a
+report can be pasted into a public GitHub issue or a Discord help channel without leaking personal
+details.
+
+---
+
+## Compatibility with earlier versions
+
+The previous `SystemCheck` and `SystemViz` nodes are aliased onto the new **ComfyDoctor Report**
+node, so workflows saved with an older version continue to open without changes.
 
 ## License
 

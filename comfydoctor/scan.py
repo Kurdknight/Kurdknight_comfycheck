@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from datetime import datetime, timezone
 
-from . import custom_nodes, env, facts, gpu, inventory
+from . import custom_nodes, env, facts, gpu, inventory, timemachine
 from .models import ScanResult, health_score
 from .rules import Context, run_all
 
@@ -28,6 +28,19 @@ def scan() -> ScanResult:
 
     ctx = Context(env=e, gpu=g, inv=inv, nodes=nodes)
     findings = run_all(ctx)
+
+    # Time machine: when a problem is NEW, say what changed alongside it (the
+    # journal on disk still holds the previous state at this point) - then
+    # record today's state for next time. Guarded: history must never be able
+    # to take down a live diagnosis.
+    try:
+        tm = timemachine.what_changed_finding(e, inv, findings)
+        if tm:
+            findings.append(tm)
+            findings.sort(key=lambda f: (f.severity.rank, f.category, f.id))
+        timemachine.record(e, inv, findings)
+    except Exception:
+        pass
 
     snapshot = {
         "environment": e.to_dict(),

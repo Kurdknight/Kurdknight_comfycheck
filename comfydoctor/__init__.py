@@ -16,6 +16,6 @@ process, and a diagnostic that kills the thing it is diagnosing is worthless.
 from .models import Finding, Remedy, ScanResult, Severity
 from .scan import last, scan
 
-__version__ = "2.0.0"
+__version__ = "2.1.1"
 
 __all__ = ["scan", "last", "Finding", "Remedy", "ScanResult", "Severity", "__version__"]
